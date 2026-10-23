@@ -1,13 +1,13 @@
 import SwiftUI
 
-public struct SettingsWindowView: View {
+struct SettingsWindowView: View {
     @Bindable var viewModel: OpaqViewModel
 
-    public init(viewModel: OpaqViewModel) {
+    init(viewModel: OpaqViewModel) {
         self.viewModel = viewModel
     }
 
-    public var body: some View {
+    var body: some View {
         NavigationSplitView {
             List(selection: $viewModel.selectedSettingsPane) {
                 Section {

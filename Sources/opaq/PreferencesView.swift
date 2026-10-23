@@ -1,13 +1,13 @@
 import SwiftUI
 
-public struct PreferencesView: View {
+struct PreferencesView: View {
     @Bindable var viewModel: OpaqViewModel
 
-    public init(viewModel: OpaqViewModel) {
+    init(viewModel: OpaqViewModel) {
         self.viewModel = viewModel
     }
 
-    public var body: some View {
+    var body: some View {
         Form {
             Section {
                 HStack {
