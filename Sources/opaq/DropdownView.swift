@@ -8,6 +8,13 @@ public struct DropdownView: View {
         self.viewModel = viewModel
     }
 
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.launchesAtLogin },
+            set: { viewModel.setLaunchesAtLogin($0) }
+        )
+    }
+
     public var body: some View {
         contentArea
             .safeAreaBar(edge: .top) { headerBar }
@@ -16,6 +23,7 @@ public struct DropdownView: View {
             .frame(minHeight: 220, maxHeight: 520)
             .onAppear {
                 viewModel.checkPermissions()
+                viewModel.refreshLaunchAtLoginStatus()
             }
     }
 
@@ -194,6 +202,8 @@ public struct DropdownView: View {
             Spacer()
 
             Menu {
+                Toggle("Launch at Login", isOn: launchAtLoginBinding)
+                    .disabled(!viewModel.canConfigureLaunchAtLogin)
                 Button("Settings…") { viewModel.openSettingsWindow() }
                 Divider()
                 Button("Quit opaq") { NSApp.terminate(nil) }
