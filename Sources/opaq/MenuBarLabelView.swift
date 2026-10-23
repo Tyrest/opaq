@@ -1,14 +1,14 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
-public struct MenuBarLabelView: View {
+struct MenuBarLabelView: View {
     var viewModel: OpaqViewModel
 
-    public init(viewModel: OpaqViewModel) {
+    init(viewModel: OpaqViewModel) {
         self.viewModel = viewModel
     }
 
-    public var body: some View {
+    var body: some View {
         HStack(spacing: 4) {
             Image(nsImage: GhostIconGenerator.menuBarGhostImage)
 
@@ -21,8 +21,9 @@ public struct MenuBarLabelView: View {
                     .font(.system(size: 12, weight: .medium).monospacedDigit())
             }
         }
-        .help(viewModel.permissions.hasAllPermissions
-              ? "opaq — Anti-Ghosting Monitor"
-              : "opaq — Permissions needed")
+        .help(
+            viewModel.permissions.hasAllPermissions
+                ? "opaq — Anti-Ghosting Monitor"
+                : "opaq — Permissions needed")
     }
 }

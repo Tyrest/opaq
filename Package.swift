@@ -22,5 +22,13 @@ let package = Package(
                 .swiftLanguageMode(.v5)
             ]
         ),
+        .testTarget(
+            name: "opaqTests",
+            dependencies: ["opaq"],
+            path: "Tests/opaqTests",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
+        ),
     ]
 )

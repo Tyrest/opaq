@@ -1,6 +1,6 @@
 import Foundation
 
-public final class FileWatcher: @unchecked Sendable {
+final class FileWatcher: @unchecked Sendable {
     private let walPath: String
     private let dbPath: String
 
@@ -13,10 +13,11 @@ public final class FileWatcher: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.local.opaq.filewatcher", qos: .utility)
     private var debounceTimer: DispatchSourceTimer?
     private let lock = NSLock()
+    private var isRunning = false
 
     private var onChange: (@Sendable () -> Void)?
 
-    public init(
+    init(
         walPath: String = DatabaseService.defaultWalPath,
         dbPath: String = DatabaseService.defaultDbPath
     ) {
@@ -28,9 +29,10 @@ public final class FileWatcher: @unchecked Sendable {
         stop()
     }
 
-    public func start(onChange: @escaping @Sendable () -> Void) {
+    func start(onChange: @escaping @Sendable () -> Void) {
         lock.lock()
         self.onChange = onChange
+        isRunning = true
         lock.unlock()
 
         queue.async { [weak self] in
@@ -38,27 +40,29 @@ public final class FileWatcher: @unchecked Sendable {
         }
     }
 
-    public func stop() {
+    func stop() {
         lock.lock()
+        isRunning = false
         debounceTimer?.cancel()
         debounceTimer = nil
         onChange = nil
 
-        walSource?.cancel()
+        let wal = walSource
+        let db = dbSource
         walSource = nil
-
-        dbSource?.cancel()
         dbSource = nil
-
-        if walFd >= 0 {
-            close(walFd)
-            walFd = -1
-        }
-        if dbFd >= 0 {
-            close(dbFd)
-            dbFd = -1
-        }
+        walFd = -1
+        dbFd = -1
         lock.unlock()
+
+        wal?.cancel()
+        db?.cancel()
+    }
+
+    private func stillRunning() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isRunning
     }
 
     private func setupWatchers() {
@@ -67,24 +71,27 @@ public final class FileWatcher: @unchecked Sendable {
     }
 
     private func watchWalFile() {
-        if walFd >= 0 {
-            close(walFd)
-            walFd = -1
+        lock.lock()
+        guard isRunning else {
+            lock.unlock()
+            return
         }
-        walSource?.cancel()
+        let previous = walSource
         walSource = nil
+        walFd = -1
+        lock.unlock()
+        previous?.cancel()
 
         guard FileManager.default.fileExists(atPath: walPath) else {
-            // WAL file may not exist yet, retry after a delay
             queue.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-                self?.watchWalFile()
+                guard let self else { return }
+                guard self.stillRunning() else { return }
+                self.watchWalFile()
             }
             return
         }
 
-        let fd = open(walPath, O_EVTONLY)
-        guard fd >= 0 else { return }
-        walFd = fd
+        guard let fd = openWatchDescriptor(path: walPath) else { return }
 
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
@@ -93,11 +100,12 @@ public final class FileWatcher: @unchecked Sendable {
         )
 
         source.setEventHandler { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
             let data = source.data
             if data.contains(.delete) || data.contains(.rename) {
-                // WAL file rotated or deleted, re-arm
-                self.queue.asyncAfter(deadline: .now() + 1.0) {
+                self.queue.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    guard let self else { return }
+                    guard self.stillRunning() else { return }
                     self.watchWalFile()
                 }
             }
@@ -108,23 +116,23 @@ public final class FileWatcher: @unchecked Sendable {
             close(fd)
         }
 
-        walSource = source
-        source.resume()
+        install(source, fd: fd, isWal: true)
     }
 
     private func watchDbFile() {
-        if dbFd >= 0 {
-            close(dbFd)
-            dbFd = -1
+        lock.lock()
+        guard isRunning else {
+            lock.unlock()
+            return
         }
-        dbSource?.cancel()
+        let previous = dbSource
         dbSource = nil
+        dbFd = -1
+        lock.unlock()
+        previous?.cancel()
 
         guard FileManager.default.fileExists(atPath: dbPath) else { return }
-
-        let fd = open(dbPath, O_EVTONLY)
-        guard fd >= 0 else { return }
-        dbFd = fd
+        guard let fd = openWatchDescriptor(path: dbPath) else { return }
 
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
@@ -140,28 +148,63 @@ public final class FileWatcher: @unchecked Sendable {
             close(fd)
         }
 
-        dbSource = source
+        install(source, fd: fd, isWal: false)
+    }
+
+    private func install(_ source: DispatchSourceFileSystemObject, fd: Int32, isWal: Bool) {
+        lock.lock()
+        if !isRunning {
+            lock.unlock()
+            // A source that was never resumed does not run its cancel handler.
+            source.cancel()
+            source.resume()
+            return
+        }
+        if isWal {
+            walFd = fd
+            walSource = source
+        } else {
+            dbFd = fd
+            dbSource = source
+        }
         source.resume()
+        lock.unlock()
+    }
+
+    private func openWatchDescriptor(path: String) -> Int32? {
+        let fd = open(path, O_EVTONLY)
+        guard fd >= 0 else {
+            let err = errno
+            let message = String(cString: strerror(err))
+            Log.watcher.error("failed to open \(path, privacy: .public): \(message, privacy: .public)")
+            return nil
+        }
+        return fd
     }
 
     private func triggerDebouncedChange() {
         lock.lock()
-        defer { lock.unlock() }
+        guard isRunning else {
+            lock.unlock()
+            return
+        }
 
         debounceTimer?.cancel()
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + .milliseconds(400))
         timer.setEventHandler { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
             self.lock.lock()
+            let running = self.isRunning
             let callback = self.onChange
             self.debounceTimer = nil
             self.lock.unlock()
-
+            guard running else { return }
             callback?()
         }
         debounceTimer = timer
         timer.resume()
+        lock.unlock()
     }
 }

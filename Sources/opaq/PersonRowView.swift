@@ -1,12 +1,12 @@
 import SwiftUI
 
-public struct PersonRowView: View {
-    public let item: UnrepliedPerson
-    public let isMuted: Bool
-    public let onReply: () -> Void
-    public let onDismiss: () -> Void
+struct PersonRowView: View {
+    let item: UnrepliedPerson
+    let isMuted: Bool
+    let onReply: () -> Void
+    let onDismiss: () -> Void
 
-    public init(
+    init(
         item: UnrepliedPerson,
         isMuted: Bool = false,
         onReply: @escaping () -> Void,
@@ -18,7 +18,7 @@ public struct PersonRowView: View {
         self.onDismiss = onDismiss
     }
 
-    public var body: some View {
+    var body: some View {
         HStack(spacing: 8) {
             Button(action: onReply) {
                 ContactIdentityRow(
@@ -39,6 +39,9 @@ public struct PersonRowView: View {
             Text(item.formattedDuration)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(durationColor)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(durationColor.opacity(0.16), in: Capsule())
                 .accessibilityLabel("Waiting \(item.formattedDuration)")
 
             Button(action: onDismiss) {
