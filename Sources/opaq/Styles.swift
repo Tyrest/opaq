@@ -6,6 +6,22 @@ public enum SettingsPane: Int, Hashable, CaseIterable {
     case people
     case quietHours
     case general
+
+    public var title: String {
+        switch self {
+        case .people: return "People"
+        case .quietHours: return "Quiet Hours"
+        case .general: return "General"
+        }
+    }
+
+    public var systemImage: String {
+        switch self {
+        case .people: return "person.2"
+        case .quietHours: return "moon"
+        case .general: return "gearshape"
+        }
+    }
 }
 
 // MARK: - Ghost Icon Button Style
@@ -58,6 +74,7 @@ public struct ContactIdentityRow: View {
     public let name: String
     public let detail: String
     public let avatarData: Data?
+    public var cacheKey: String?
     public var size: CGFloat
     public var isMuted: Bool
 
@@ -65,19 +82,21 @@ public struct ContactIdentityRow: View {
         name: String,
         detail: String,
         avatarData: Data? = nil,
+        cacheKey: String? = nil,
         size: CGFloat = 28,
         isMuted: Bool = false
     ) {
         self.name = name
         self.detail = detail
         self.avatarData = avatarData
+        self.cacheKey = cacheKey
         self.size = size
         self.isMuted = isMuted
     }
 
     public var body: some View {
         HStack(spacing: 10) {
-            AvatarView(name: name, avatarData: avatarData, size: size)
+            AvatarView(name: name, avatarData: avatarData, cacheKey: cacheKey, size: size)
                 .opacity(isMuted ? 0.7 : 1.0)
 
             VStack(alignment: .leading, spacing: 1) {

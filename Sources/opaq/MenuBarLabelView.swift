@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 public struct MenuBarLabelView: View {
-    @ObservedObject var viewModel: OpaqViewModel
+    var viewModel: OpaqViewModel
 
     public init(viewModel: OpaqViewModel) {
         self.viewModel = viewModel

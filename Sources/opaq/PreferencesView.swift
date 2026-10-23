@@ -1,7 +1,7 @@
 import SwiftUI
 
 public struct PreferencesView: View {
-    @ObservedObject var viewModel: OpaqViewModel
+    @Bindable var viewModel: OpaqViewModel
 
     public init(viewModel: OpaqViewModel) {
         self.viewModel = viewModel
@@ -50,18 +50,6 @@ public struct PreferencesView: View {
                 Text("System Permissions")
             } footer: {
                 Text("opaq operates in strictly read-only mode and never modifies or locks your iMessage database.")
-            }
-
-            Section {
-                HStack {
-                    Text("Connection Status")
-                    Spacer()
-                    Button("Retry Connection") {
-                        viewModel.retryConnection()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
             }
         }
         .formStyle(.grouped)

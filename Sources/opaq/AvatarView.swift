@@ -4,17 +4,19 @@ import AppKit
 public struct AvatarView: View {
     public let name: String
     public let avatarData: Data?
+    public let cacheKey: String?
     public let size: CGFloat
 
-    public init(name: String, avatarData: Data? = nil, size: CGFloat = 32) {
+    public init(name: String, avatarData: Data? = nil, cacheKey: String? = nil, size: CGFloat = 32) {
         self.name = name
         self.avatarData = avatarData
+        self.cacheKey = cacheKey
         self.size = size
     }
 
     public var body: some View {
         Group {
-            if let data = avatarData, let nsImage = NSImage(data: data) {
+            if let nsImage = cachedImage {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -36,6 +38,23 @@ public struct AvatarView: View {
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
         )
     }
+
+    private var cachedImage: NSImage? {
+        guard let data = avatarData, !data.isEmpty else { return nil }
+        let key = (cacheKey ?? "\(data.count)") as NSString
+        if let cached = Self.imageCache.object(forKey: key) {
+            return cached
+        }
+        guard let image = NSImage(data: data) else { return nil }
+        Self.imageCache.setObject(image, forKey: key)
+        return image
+    }
+
+    private static let imageCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 400
+        return cache
+    }()
 
     private func initialsForName(_ name: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)

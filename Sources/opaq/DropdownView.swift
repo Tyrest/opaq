@@ -2,26 +2,21 @@ import SwiftUI
 import AppKit
 
 public struct DropdownView: View {
-    @ObservedObject var viewModel: OpaqViewModel
+    @Bindable var viewModel: OpaqViewModel
 
     public init(viewModel: OpaqViewModel) {
         self.viewModel = viewModel
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            headerBar
-            Divider()
-            contentArea
-            Divider()
-            footerBar
-        }
-        .frame(width: 360)
-        .frame(minHeight: 200, maxHeight: 520)
-        .background(.regularMaterial)
-        .onAppear {
-            viewModel.checkPermissions()
-        }
+        contentArea
+            .safeAreaBar(edge: .top) { headerBar }
+            .safeAreaBar(edge: .bottom) { footerBar }
+            .frame(width: 360)
+            .frame(minHeight: 220, maxHeight: 520)
+            .onAppear {
+                viewModel.checkPermissions()
+            }
     }
 
     // MARK: - Header
@@ -51,7 +46,8 @@ public struct DropdownView: View {
                         value: viewModel.isRefreshing
                     )
             }
-            .buttonStyle(GhostIconButtonStyle())
+            .buttonStyle(.glass)
+            .controlSize(.small)
             .disabled(viewModel.isRefreshing)
             .help("Refresh now")
 
@@ -60,7 +56,8 @@ public struct DropdownView: View {
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
-            .buttonStyle(GhostIconButtonStyle())
+            .buttonStyle(.glass)
+            .controlSize(.small)
             .help("Settings")
         }
         .padding(.horizontal, 14)
@@ -112,7 +109,7 @@ public struct DropdownView: View {
                 }
             }
         }
-        .listStyle(.sidebar)
+        .listStyle(.inset)
         .scrollContentBackground(.hidden)
     }
 
@@ -141,16 +138,16 @@ public struct DropdownView: View {
             HStack(spacing: 8) {
                 if !viewModel.permissions.fullDiskAccess {
                     Button("Disk Access") { viewModel.openFullDiskAccessSettings() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glass)
                         .controlSize(.small)
                 }
                 if !viewModel.permissions.contactsAccess {
                     Button("Contacts") { viewModel.requestContactsAccess() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glass)
                         .controlSize(.small)
                 }
                 Button("Retry") { viewModel.retryConnection() }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .controlSize(.small)
             }
         }
@@ -175,7 +172,7 @@ public struct DropdownView: View {
                 Button(viewModel.trackAllByDefault ? "Open Settings" : "Add People to Track") {
                     viewModel.openSettingsWindow()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .controlSize(.small)
                 .padding(.top, 4)
             }

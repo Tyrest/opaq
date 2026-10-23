@@ -1,16 +1,16 @@
 import Foundation
-import Combine
 import SwiftUI
 import AppKit
 
 @MainActor
-public final class OpaqViewModel: ObservableObject {
+@Observable
+public final class OpaqViewModel {
     public static let shared = OpaqViewModel()
 
-    // MARK: - Published Properties
+    // MARK: - Observable State
 
-    @Published public private(set) var trackedPeople: [TrackedPerson] = []
-    @Published public var trackAllByDefault: Bool = true {
+    public private(set) var trackedPeople: [TrackedPerson] = []
+    public var trackAllByDefault: Bool = true {
         didSet {
             saveTrackAllByDefault()
             if !trackAllByDefault && manualAdditions.isEmpty {
@@ -20,29 +20,29 @@ public final class OpaqViewModel: ObservableObject {
             refresh()
         }
     }
-    @Published public private(set) var excludedPersonIds: Set<String> = []
-    @Published public private(set) var excludedPeople: [TrackedPerson] = []
-    @Published public private(set) var dismissedTimestamps: [String: Int64] = [:]
-    @Published public var gracePeriodHours: Double = 2.0 {
+    public private(set) var excludedPersonIds: Set<String> = []
+    public private(set) var excludedPeople: [TrackedPerson] = []
+    public private(set) var dismissedTimestamps: [String: Int64] = [:]
+    public var gracePeriodHours: Double = 2.0 {
         didSet {
             saveGracePeriod()
             recalculateUnrepliedStatus()
         }
     }
-    @Published public var quietHoursSchedule: QuietHoursSchedule = .defaultSchedule {
+    public var quietHoursSchedule: QuietHoursSchedule = .defaultSchedule {
         didSet {
             saveQuietHoursSchedule()
             updateQuietHoursState()
         }
     }
 
-    @Published public private(set) var unrepliedPeople: [UnrepliedPerson] = []
-    @Published public private(set) var suggestedPeople: [SuggestedPerson] = []
-    @Published public private(set) var permissions: PermissionStatus = .init(fullDiskAccess: false, contactsAccess: false)
-    @Published public private(set) var isQuietHoursActive: Bool = false
-    @Published public private(set) var isRefreshing: Bool = false
-    @Published public private(set) var lastUpdated: Date? = nil
-    @Published public var settingsPane: SettingsPane = .people
+    public private(set) var unrepliedPeople: [UnrepliedPerson] = []
+    public private(set) var suggestedPeople: [SuggestedPerson] = []
+    public private(set) var permissions: PermissionStatus = .init(fullDiskAccess: false, contactsAccess: false)
+    public private(set) var isQuietHoursActive: Bool = false
+    public private(set) var isRefreshing: Bool = false
+    public private(set) var lastUpdated: Date? = nil
+    public var selectedSettingsPane: SettingsPane = .people
 
     // Derived lists
     public var unrepliedPastGracePeriod: [UnrepliedPerson] {
@@ -230,7 +230,10 @@ public final class OpaqViewModel: ObservableObject {
     }
 
     private func updateQuietHoursState() {
-        isQuietHoursActive = quietHoursSchedule.isCurrentlyActive()
+        let active = quietHoursSchedule.isCurrentlyActive()
+        if active != isQuietHoursActive {
+            isQuietHoursActive = active
+        }
     }
 
     // MARK: - Permissions & Setup
@@ -259,7 +262,10 @@ public final class OpaqViewModel: ObservableObject {
     public func checkPermissions() {
         let fda = databaseService.checkFullDiskAccess()
         let contacts = contactManager.checkAuthorizationStatus()
-        self.permissions = PermissionStatus(fullDiskAccess: fda, contactsAccess: contacts)
+        let next = PermissionStatus(fullDiskAccess: fda, contactsAccess: contacts)
+        if next != permissions {
+            permissions = next
+        }
     }
 
     public func retryConnection() {
@@ -362,9 +368,15 @@ public final class OpaqViewModel: ObservableObject {
                 return (finalTracked, finalExcluded, sugg, map)
             }.value
 
-            self.trackedPeople = newTracked
-            self.excludedPeople = newExcluded
-            self.suggestedPeople = suggestions
+            if Self.peopleChanged(trackedPeople, newTracked) {
+                self.trackedPeople = newTracked
+            }
+            if Self.peopleChanged(excludedPeople, newExcluded) {
+                self.excludedPeople = newExcluded
+            }
+            if Self.suggestionsChanged(suggestedPeople, suggestions) {
+                self.suggestedPeople = suggestions
+            }
             self.rawLatestMessages = latestMap
             if fdaGranted {
                 self.ensureTrackingBaselineIfNeeded()
@@ -419,7 +431,31 @@ public final class OpaqViewModel: ObservableObject {
         // Sort ascending by unix_timestamp (longest waiting / oldest message is #1 at top)
         unrepliedList.sort { $0.latestMessage.unixTimestamp < $1.latestMessage.unixTimestamp }
 
-        self.unrepliedPeople = unrepliedList
+        if unrepliedList != unrepliedPeople {
+            unrepliedPeople = unrepliedList
+        }
+    }
+
+    private static func peopleChanged(_ current: [TrackedPerson], _ next: [TrackedPerson]) -> Bool {
+        guard current.count == next.count else { return true }
+        for (lhs, rhs) in zip(current, next) {
+            if lhs.id != rhs.id || lhs.displayName != rhs.displayName || lhs.handles != rhs.handles {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func suggestionsChanged(_ current: [SuggestedPerson], _ next: [SuggestedPerson]) -> Bool {
+        guard current.count == next.count else { return true }
+        for (lhs, rhs) in zip(current, next) {
+            if lhs.person.id != rhs.person.id
+                || lhs.person.displayName != rhs.person.displayName
+                || lhs.totalMessages != rhs.totalMessages {
+                return true
+            }
+        }
+        return false
     }
 
     // MARK: - Actions
@@ -470,9 +506,20 @@ public final class OpaqViewModel: ObservableObject {
         }
     }
 
-    public func openSettingsWindow(pane: SettingsPane = .people) {
-        settingsPane = pane
-        SettingsWindowManager.shared.show(viewModel: self)
+    public func openSettingsWindow(pane: SettingsPane? = nil) {
+        if let pane {
+            selectedSettingsPane = pane
+        }
+        if let open = SettingsOpener.open {
+            open()
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                SettingsOpener.open?()
+                NSApp.activate(ignoringOtherApps: true)
+                _ = self
+            }
+        }
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - Duration Formatting

@@ -59,7 +59,7 @@ cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>26.0</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSContactsUsageDescription</key>

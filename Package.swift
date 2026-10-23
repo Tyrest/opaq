@@ -1,10 +1,10 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "opaq",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v26)
     ],
     products: [
         .executable(
@@ -17,7 +17,10 @@ let package = Package(
         .executableTarget(
             name: "opaq",
             dependencies: [],
-            path: "Sources/opaq"
+            path: "Sources/opaq",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
         ),
     ]
 )

@@ -1,32 +1,43 @@
 import SwiftUI
 
 public struct SettingsWindowView: View {
-    @ObservedObject var viewModel: OpaqViewModel
+    @Bindable var viewModel: OpaqViewModel
 
     public init(viewModel: OpaqViewModel) {
         self.viewModel = viewModel
     }
 
     public var body: some View {
-        TabView(selection: $viewModel.settingsPane) {
-            PeopleManagerView(viewModel: viewModel)
-                .tabItem {
-                    Label("People", systemImage: "person.2")
+        NavigationSplitView {
+            List(selection: $viewModel.selectedSettingsPane) {
+                Section {
+                    ForEach(SettingsPane.allCases, id: \.self) { pane in
+                        Label(pane.title, systemImage: pane.systemImage)
+                            .tag(pane)
+                    }
                 }
-                .tag(SettingsPane.people)
-
-            QuietHoursView(viewModel: viewModel)
-                .tabItem {
-                    Label("Quiet Hours", systemImage: "moon")
-                }
-                .tag(SettingsPane.quietHours)
-
-            PreferencesView(viewModel: viewModel)
-                .tabItem {
-                    Label("General", systemImage: "gearshape")
-                }
-                .tag(SettingsPane.general)
+            }
+            .listStyle(.sidebar)
+            .navigationTitle("Settings")
+            .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 260)
+        } detail: {
+            destination(for: viewModel.selectedSettingsPane)
+                .navigationTitle(viewModel.selectedSettingsPane.title)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 600, idealWidth: 680, minHeight: 440, idealHeight: 520)
+        .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 780, minHeight: 520)
+    }
+
+    @ViewBuilder
+    private func destination(for pane: SettingsPane) -> some View {
+        switch pane {
+        case .people:
+            PeopleManagerView(viewModel: viewModel)
+        case .quietHours:
+            QuietHoursView(viewModel: viewModel)
+        case .general:
+            PreferencesView(viewModel: viewModel)
+        }
     }
 }

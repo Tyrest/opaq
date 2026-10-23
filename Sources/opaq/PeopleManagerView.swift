@@ -1,21 +1,21 @@
 import SwiftUI
 
 public struct PeopleManagerView: View {
-    @ObservedObject var viewModel: OpaqViewModel
+    @Bindable var viewModel: OpaqViewModel
     @State private var searchText: String = ""
+    @State private var searchResults: [ContactCard] = []
 
     public init(viewModel: OpaqViewModel) {
         self.viewModel = viewModel
     }
 
-    public var body: some View {
-        Form {
-            Section {
-                TextField("Search contacts by name, phone, or email", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-            }
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
-            if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    public var body: some View {
+        List {
+            if isSearching {
                 searchResultsSection
             } else {
                 defaultTrackingToggleSection
@@ -29,13 +29,17 @@ public struct PeopleManagerView: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .listStyle(.inset)
+        .searchable(text: $searchText, placement: .toolbar, prompt: "Search contacts")
+        .onChange(of: searchText) { _, newValue in
+            searchResults = ContactManager.shared.searchContacts(query: newValue, limit: 40)
+        }
     }
 
     // MARK: - Search Results
 
     private var searchResultsSection: some View {
-        let matching = ContactManager.shared.searchContacts(query: searchText)
+        let matching = searchResults
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         return Section("Search Results") {
@@ -66,7 +70,8 @@ public struct PeopleManagerView: View {
                         ContactIdentityRow(
                             name: card.displayName,
                             detail: card.allHandles.prefix(2).joined(separator: ", "),
-                            avatarData: card.avatarData
+                            avatarData: card.avatarData,
+                            cacheKey: card.id
                         )
 
                         Spacer()
@@ -120,7 +125,7 @@ public struct PeopleManagerView: View {
                          ? (viewModel.permissions.fullDiskAccess
                             ? "Your 1-on-1 iMessage conversations will automatically appear here."
                             : "Full Disk Access is required to automatically discover conversations.")
-                         : "Add someone from the suggestions below or search above.")
+                         : "Add someone from the suggestions below, or use the search field.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -130,7 +135,8 @@ public struct PeopleManagerView: View {
                         ContactIdentityRow(
                             name: person.displayName,
                             detail: person.primaryHandle,
-                            avatarData: person.avatarData
+                            avatarData: person.avatarData,
+                            cacheKey: person.id
                         )
 
                         Spacer()
@@ -155,7 +161,8 @@ public struct PeopleManagerView: View {
                     ContactIdentityRow(
                         name: person.displayName,
                         detail: person.primaryHandle,
-                        avatarData: person.avatarData
+                        avatarData: person.avatarData,
+                        cacheKey: person.id
                     )
 
                     Spacer()
@@ -187,7 +194,8 @@ public struct PeopleManagerView: View {
                         ContactIdentityRow(
                             name: suggestion.person.displayName,
                             detail: suggestion.person.primaryHandle,
-                            avatarData: suggestion.person.avatarData
+                            avatarData: suggestion.person.avatarData,
+                            cacheKey: suggestion.person.id
                         )
 
                         Spacer()

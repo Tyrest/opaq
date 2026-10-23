@@ -232,14 +232,10 @@ public final class ContactManager: @unchecked Sendable {
         return nil
     }
 
-    public func searchContacts(query: String) -> [ContactCard] {
+    public func searchContacts(query: String, limit: Int = 40) -> [ContactCard] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            lock.lock()
-            let all = contactsCache
-            lock.unlock()
-            return Array(all.prefix(50))
-        }
+        guard !trimmed.isEmpty else { return [] }
+        guard limit > 0 else { return [] }
 
         let lowerQuery = trimmed.lowercased()
         let phoneNorm = Self.normalizePhone(trimmed)
@@ -248,26 +244,35 @@ public final class ContactManager: @unchecked Sendable {
         let all = contactsCache
         lock.unlock()
 
-        return all.filter { card in
-            if card.displayName.lowercased().contains(lowerQuery) {
-                return true
-            }
-            for email in card.emailAddresses {
-                if email.lowercased().contains(lowerQuery) {
-                    return true
+        var matches: [ContactCard] = []
+        matches.reserveCapacity(min(limit, 40))
+
+        for card in all {
+            let nameMatches = card.displayName.lowercased().contains(lowerQuery)
+            let emailMatches = card.emailAddresses.contains { $0.lowercased().contains(lowerQuery) }
+            var phoneMatches = false
+            if !nameMatches && !emailMatches {
+                for phone in card.phoneNumbers {
+                    let cardNorm = Self.normalizePhone(phone)
+                    if cardNorm.exact.contains(phoneNorm.exact) {
+                        phoneMatches = true
+                        break
+                    }
+                    if let qLast10 = phoneNorm.last10, let cLast10 = cardNorm.last10, cLast10 == qLast10 {
+                        phoneMatches = true
+                        break
+                    }
                 }
             }
-            for phone in card.phoneNumbers {
-                let cardNorm = Self.normalizePhone(phone)
-                if cardNorm.exact.contains(phoneNorm.exact) {
-                    return true
-                }
-                if let qLast10 = phoneNorm.last10, let cLast10 = cardNorm.last10, cLast10 == qLast10 {
-                    return true
+            if nameMatches || emailMatches || phoneMatches {
+                matches.append(card)
+                if matches.count >= limit {
+                    break
                 }
             }
-            return false
         }
+
+        return matches
     }
 
     // MARK: - TrackedPerson Factory

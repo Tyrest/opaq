@@ -1,7 +1,7 @@
 import SwiftUI
 
 public struct QuietHoursView: View {
-    @ObservedObject var viewModel: OpaqViewModel
+    @Bindable var viewModel: OpaqViewModel
 
     private let weekdayDays: [(id: Int, label: String, fullName: String)] = [
         (2, "Mon", "Monday"),
@@ -71,16 +71,11 @@ public struct QuietHoursView: View {
             Section {
                 HStack(spacing: 6) {
                     ForEach(weekdayDays, id: \.id) { day in
-                        let isActive = viewModel.quietHoursSchedule.activeWeekdays.contains(day.id)
-                        Button(day.label) {
-                            toggleDay(day.id)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(isActive && viewModel.quietHoursSchedule.isEnabled ? Color.accentColor : nil)
-                        .disabled(!viewModel.quietHoursSchedule.isEnabled)
-                        .help(day.fullName)
-                        .accessibilityLabel(day.fullName)
-                        .accessibilityValue(isActive ? "Selected" : "Not selected")
+                        Toggle(day.label, isOn: weekdayBinding(day.id))
+                            .toggleStyle(.button)
+                            .disabled(!viewModel.quietHoursSchedule.isEnabled)
+                            .help(day.fullName)
+                            .accessibilityLabel(day.fullName)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -123,11 +118,16 @@ public struct QuietHoursView: View {
         return "Quiet Hours are currently inactive — timer will display when unreplied"
     }
 
-    private func toggleDay(_ dayId: Int) {
-        if viewModel.quietHoursSchedule.activeWeekdays.contains(dayId) {
-            viewModel.quietHoursSchedule.activeWeekdays.remove(dayId)
-        } else {
-            viewModel.quietHoursSchedule.activeWeekdays.insert(dayId)
-        }
+    private func weekdayBinding(_ dayId: Int) -> Binding<Bool> {
+        Binding(
+            get: { viewModel.quietHoursSchedule.activeWeekdays.contains(dayId) },
+            set: { isOn in
+                if isOn {
+                    viewModel.quietHoursSchedule.activeWeekdays.insert(dayId)
+                } else {
+                    viewModel.quietHoursSchedule.activeWeekdays.remove(dayId)
+                }
+            }
+        )
     }
 }

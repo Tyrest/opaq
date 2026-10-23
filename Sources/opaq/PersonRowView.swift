@@ -25,6 +25,7 @@ public struct PersonRowView: View {
                     name: item.person.displayName,
                     detail: item.primaryHandle,
                     avatarData: item.person.avatarData,
+                    cacheKey: item.person.id,
                     size: 28,
                     isMuted: isMuted
                 )
