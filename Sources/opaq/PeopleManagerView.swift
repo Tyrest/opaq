@@ -48,20 +48,22 @@ struct PeopleManagerView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("No matching contacts found")
                             .foregroundStyle(.secondary)
-                        Text("You can track “\(query)” directly as a manual handle.")
+                        Text(unmatchedSearchDetail(for: query))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
 
                     Spacer()
 
-                    Button("Track Directly") {
-                        let person = viewModel.trackedPerson(manualHandle: query)
-                        viewModel.addTrackedPerson(person)
-                        searchText = ""
+                    if !viewModel.onlyTrackContacts {
+                        Button("Track Directly") {
+                            let person = viewModel.trackedPerson(manualHandle: query)
+                            viewModel.addTrackedPerson(person)
+                            searchText = ""
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
             } else {
                 ForEach(matching) { card in
@@ -101,13 +103,67 @@ struct PeopleManagerView: View {
             Toggle(isOn: $viewModel.trackAllByDefault) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Track Everyone by Default")
-                    Text("Automatically monitor all 1-on-1 iMessage conversations. Only messages sent after you first connected opaq start the timer. You can exclude specific contacts below.")
+                    Text(trackEveryoneDetail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
             .toggleStyle(.switch)
+
+            Toggle(isOn: $viewModel.onlyTrackContacts) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Only Track Contacts")
+                    Text("Limit tracking to people saved in Contacts. Phone numbers and emails without a contact card are left out while this is on.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.switch)
+
+            if viewModel.onlyTrackContacts && !viewModel.permissions.contactsAccess {
+                HStack(alignment: .center, spacing: 12) {
+                    Text("Contacts access matches each conversation to a saved contact.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Grant Access") {
+                        viewModel.requestContactsAccess()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
         }
+    }
+
+    private var trackEveryoneDetail: String {
+        let who = viewModel.onlyTrackContacts
+            ? "1-on-1 conversations with people saved in Contacts"
+            : "all 1-on-1 iMessage conversations"
+        return "Automatically monitor \(who). Only messages sent after you first connected opaq start the timer. You can exclude specific contacts below."
+    }
+
+    private var emptyTrackingDetail: String {
+        if viewModel.trackAllByDefault {
+            if !viewModel.permissions.fullDiskAccess {
+                return "Full Disk Access is required to automatically discover conversations."
+            }
+            if viewModel.onlyTrackContacts {
+                return "1-on-1 conversations with people saved in Contacts will appear here."
+            }
+            return "Your 1-on-1 iMessage conversations will automatically appear here."
+        }
+        if viewModel.onlyTrackContacts {
+            return "Add someone saved in Contacts from the suggestions below, or use the search field."
+        }
+        return "Add someone from the suggestions below, or use the search field."
+    }
+
+    private func unmatchedSearchDetail(for query: String) -> String {
+        if viewModel.onlyTrackContacts {
+            return "Tracking is limited to people saved in Contacts."
+        }
+        return "You can track “\(query)” directly as a manual handle."
     }
 
     // MARK: - Currently Tracking
@@ -122,15 +178,9 @@ struct PeopleManagerView: View {
             if viewModel.trackedPeople.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(viewModel.trackAllByDefault ? "No active conversations found" : "No contacts tracked yet")
-                    Text(
-                        viewModel.trackAllByDefault
-                            ? (viewModel.permissions.fullDiskAccess
-                                ? "Your 1-on-1 iMessage conversations will automatically appear here."
-                                : "Full Disk Access is required to automatically discover conversations.")
-                            : "Add someone from the suggestions below, or use the search field."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Text(emptyTrackingDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             } else {
                 ForEach(viewModel.trackedPeople) { person in
@@ -187,7 +237,9 @@ struct PeopleManagerView: View {
             if viewModel.suggestedPeople.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("No suggestions available")
-                    Text("Top 1-on-1 conversations from iMessage will automatically appear here.")
+                    Text(viewModel.onlyTrackContacts
+                         ? "People saved in Contacts who you text will appear here."
+                         : "Top 1-on-1 conversations from iMessage will automatically appear here.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
