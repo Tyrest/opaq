@@ -2,12 +2,12 @@ import SwiftUI
 
 // MARK: - Settings Pane
 
-public enum SettingsPane: Int, Hashable, CaseIterable {
+enum SettingsPane: Int, Hashable, CaseIterable {
     case people
     case quietHours
     case general
 
-    public var title: String {
+    var title: String {
         switch self {
         case .people: return "People"
         case .quietHours: return "Quiet Hours"
@@ -15,7 +15,7 @@ public enum SettingsPane: Int, Hashable, CaseIterable {
         }
     }
 
-    public var systemImage: String {
+    var systemImage: String {
         switch self {
         case .people: return "person.2"
         case .quietHours: return "moon"
@@ -24,61 +24,17 @@ public enum SettingsPane: Int, Hashable, CaseIterable {
     }
 }
 
-// MARK: - Ghost Icon Button Style
-
-public struct GhostIconButtonStyle: ButtonStyle {
-    public var size: CGFloat
-    public var cornerRadius: CGFloat
-
-    public init(size: CGFloat = 22, cornerRadius: CGFloat = 6) {
-        self.size = size
-        self.cornerRadius = cornerRadius
-    }
-
-    public func makeBody(configuration: Configuration) -> some View {
-        GhostIconButtonBody(configuration: configuration, size: size, cornerRadius: cornerRadius)
-    }
-
-    private struct GhostIconButtonBody: View {
-        let configuration: Configuration
-        let size: CGFloat
-        let cornerRadius: CGFloat
-        @State private var isHovered = false
-
-        var body: some View {
-            configuration.label
-                .frame(width: size, height: size)
-                .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .background(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(backgroundColor)
-                )
-                .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
-                .animation(.snappy(duration: 0.12), value: configuration.isPressed)
-                .animation(.easeOut(duration: 0.12), value: isHovered)
-                .onHover { isHovered = $0 }
-        }
-
-        private var backgroundColor: Color {
-            if configuration.isPressed {
-                return Color.primary.opacity(0.12)
-            }
-            return isHovered ? Color.primary.opacity(0.07) : Color.clear
-        }
-    }
-}
-
 // MARK: - Contact Identity
 
-public struct ContactIdentityRow: View {
-    public let name: String
-    public let detail: String
-    public let avatarData: Data?
-    public var cacheKey: String?
-    public var size: CGFloat
-    public var isMuted: Bool
+struct ContactIdentityRow: View {
+    let name: String
+    let detail: String
+    let avatarData: Data?
+    var cacheKey: String?
+    var size: CGFloat
+    var isMuted: Bool
 
-    public init(
+    init(
         name: String,
         detail: String,
         avatarData: Data? = nil,
@@ -94,7 +50,7 @@ public struct ContactIdentityRow: View {
         self.isMuted = isMuted
     }
 
-    public var body: some View {
+    var body: some View {
         HStack(spacing: 10) {
             AvatarView(name: name, avatarData: avatarData, cacheKey: cacheKey, size: size)
                 .opacity(isMuted ? 0.7 : 1.0)
