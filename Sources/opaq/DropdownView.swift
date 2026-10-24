@@ -1,10 +1,10 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
-public struct DropdownView: View {
+struct DropdownView: View {
     @Bindable var viewModel: OpaqViewModel
 
-    public init(viewModel: OpaqViewModel) {
+    init(viewModel: OpaqViewModel) {
         self.viewModel = viewModel
     }
 
@@ -15,7 +15,7 @@ public struct DropdownView: View {
         )
     }
 
-    public var body: some View {
+    var body: some View {
         contentArea
             .safeAreaBar(edge: .top) { headerBar }
             .safeAreaBar(edge: .bottom) { footerBar }
@@ -46,18 +46,13 @@ public struct DropdownView: View {
                 Image(systemName: "arrow.clockwise")
                     .font(.body)
                     .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(viewModel.isRefreshing ? 360 : 0))
-                    .animation(
-                        viewModel.isRefreshing
-                            ? .linear(duration: 0.7).repeatForever(autoreverses: false)
-                            : .default,
-                        value: viewModel.isRefreshing
-                    )
+                    .symbolEffect(.rotate, isActive: viewModel.isRefreshing)
             }
             .buttonStyle(.glass)
             .controlSize(.small)
             .disabled(viewModel.isRefreshing)
             .help("Refresh now")
+            .accessibilityLabel("Refresh")
 
             Button(action: { viewModel.openSettingsWindow() }) {
                 Image(systemName: "gearshape")
@@ -67,12 +62,16 @@ public struct DropdownView: View {
             .buttonStyle(.glass)
             .controlSize(.small)
             .help("Settings")
+            .accessibilityLabel("Settings")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
     private var headerSubtitle: String {
+        if viewModel.databaseError != nil {
+            return "Couldn't read Messages"
+        }
         if viewModel.isQuietHoursActive {
             return "Quiet Hours until \(viewModel.quietHoursSchedule.endTimeFormatted)"
         }
@@ -93,7 +92,11 @@ public struct DropdownView: View {
                 }
             }
 
-            if viewModel.unrepliedPeople.isEmpty {
+            if let databaseError = viewModel.databaseError {
+                Section("Couldn't read Messages") {
+                    databaseErrorSection(databaseError)
+                }
+            } else if viewModel.unrepliedPeople.isEmpty {
                 Section {
                     emptyState
                         .listRowSeparator(.hidden)
@@ -159,6 +162,23 @@ public struct DropdownView: View {
                     .controlSize(.small)
             }
         }
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - Database Error
+
+    private func databaseErrorSection(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Retry") { viewModel.retryConnection() }
+                .buttonStyle(.glass)
+                .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
     }
 

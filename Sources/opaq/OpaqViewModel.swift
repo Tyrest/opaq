@@ -1,18 +1,19 @@
-import Foundation
-import SwiftUI
 import AppKit
+import Foundation
 import ServiceManagement
+import SwiftUI
 
 @MainActor
 @Observable
-public final class OpaqViewModel {
-    public static let shared = OpaqViewModel()
+final class OpaqViewModel {
+    static let shared = OpaqViewModel()
 
     // MARK: - Observable State
 
-    public private(set) var trackedPeople: [TrackedPerson] = []
-    public var trackAllByDefault: Bool = true {
+    private(set) var trackedPeople: [TrackedPerson] = []
+    var trackAllByDefault: Bool = true {
         didSet {
+            guard !isLoadingPersistedState else { return }
             saveTrackAllByDefault()
             if !trackAllByDefault && manualAdditions.isEmpty {
                 manualAdditions = trackedPeople
@@ -22,8 +23,9 @@ public final class OpaqViewModel {
         }
     }
     /// When true, phone numbers and emails with no Contacts card are left untracked.
-    public var onlyTrackContacts: Bool = false {
+    var onlyTrackContacts: Bool = false {
         didSet {
+            guard !isLoadingPersistedState else { return }
             saveOnlyTrackContacts()
             if onlyTrackContacts {
                 applyContactsOnlyFilter()
@@ -31,43 +33,47 @@ public final class OpaqViewModel {
             refresh()
         }
     }
-    public private(set) var excludedPersonIds: Set<String> = []
-    public private(set) var excludedPeople: [TrackedPerson] = []
-    public private(set) var dismissedTimestamps: [String: Int64] = [:]
-    public var gracePeriodHours: Double = 2.0 {
+    private(set) var excludedPersonIds: Set<String> = []
+    private(set) var excludedPeople: [TrackedPerson] = []
+    private(set) var dismissedTimestamps: [String: Int64] = [:]
+    var gracePeriodHours: Double = 2.0 {
         didSet {
+            guard !isLoadingPersistedState else { return }
             saveGracePeriod()
             recalculateUnrepliedStatus()
         }
     }
-    public var quietHoursSchedule: QuietHoursSchedule = .defaultSchedule {
+    var quietHoursSchedule: QuietHoursSchedule = .defaultSchedule {
         didSet {
+            guard !isLoadingPersistedState else { return }
             saveQuietHoursSchedule()
             updateQuietHoursState()
         }
     }
 
-    public private(set) var unrepliedPeople: [UnrepliedPerson] = []
-    public private(set) var suggestedPeople: [SuggestedPerson] = []
-    public private(set) var permissions: PermissionStatus = .init(fullDiskAccess: false, contactsAccess: false)
-    public private(set) var isQuietHoursActive: Bool = false
-    public private(set) var isRefreshing: Bool = false
-    public private(set) var lastUpdated: Date? = nil
-    public var selectedSettingsPane: SettingsPane = .people
-    public private(set) var launchesAtLogin: Bool = false
-    public private(set) var launchAtLoginNeedsApproval: Bool = false
-    public private(set) var launchAtLoginMessage: String?
+    private(set) var unrepliedPeople: [UnrepliedPerson] = []
+    private(set) var suggestedPeople: [SuggestedPerson] = []
+    private(set) var permissions: PermissionStatus = .init(fullDiskAccess: false, contactsAccess: false)
+    private(set) var isQuietHoursActive: Bool = false
+    private(set) var isRefreshing: Bool = false
+    private(set) var lastUpdated: Date? = nil
+    /// Chat.db read failure. Stays nil when Full Disk Access has not been granted.
+    private(set) var databaseError: String?
+    var selectedSettingsPane: SettingsPane = .people
+    private(set) var launchesAtLogin: Bool = false
+    private(set) var launchAtLoginNeedsApproval: Bool = false
+    private(set) var launchAtLoginMessage: String?
 
     // Derived lists
-    public var unrepliedPastGracePeriod: [UnrepliedPerson] {
+    var unrepliedPastGracePeriod: [UnrepliedPerson] {
         unrepliedPeople.filter { !$0.isInGracePeriod }
     }
 
-    public var unrepliedInGracePeriod: [UnrepliedPerson] {
+    var unrepliedInGracePeriod: [UnrepliedPerson] {
         unrepliedPeople.filter { $0.isInGracePeriod }
     }
 
-    public var menuBarTimerText: String? {
+    var menuBarTimerText: String? {
         guard !isQuietHoursActive else { return nil }
         guard let first = unrepliedPastGracePeriod.first else { return nil }
         return first.formattedDuration
@@ -83,6 +89,7 @@ public final class OpaqViewModel {
     private var repeatingTimer: Timer?
     private var rawLatestMessages: [String: LatestMessageInfo] = [:]
     private var launchAtLoginObserver: NSObjectProtocol?
+    private var isLoadingPersistedState = false
     private var refreshPending = false
 
     private let userDefaults = UserDefaults.standard
@@ -100,7 +107,7 @@ public final class OpaqViewModel {
 
     // MARK: - Initialization
 
-    public init(
+    init(
         contactManager: ContactManager = .shared,
         databaseService: DatabaseService = .shared,
         fileWatcher: FileWatcher = FileWatcher()
@@ -121,43 +128,84 @@ public final class OpaqViewModel {
     // MARK: - Persistence
 
     private func loadPersistedState() {
+        isLoadingPersistedState = true
+        defer { isLoadingPersistedState = false }
+
+        let trackAllFallback = trackAllByDefault
+        let graceFallback = gracePeriodHours
+        let quietFallback = quietHoursSchedule
+
+        let loadedTrackAll: Bool
         if userDefaults.object(forKey: trackAllByDefaultKey) != nil {
-            self.trackAllByDefault = userDefaults.bool(forKey: trackAllByDefaultKey)
+            loadedTrackAll = userDefaults.bool(forKey: trackAllByDefaultKey)
         } else {
-            self.trackAllByDefault = true
+            loadedTrackAll = trackAllFallback
         }
 
+        let loadedExcluded: Set<String>
         if let array = userDefaults.stringArray(forKey: excludedPersonIdsKey) {
-            self.excludedPersonIds = Set(array)
+            loadedExcluded = Set(array)
+        } else {
+            loadedExcluded = []
         }
 
+        let loadedManual: [TrackedPerson]
         if let data = userDefaults.data(forKey: trackedPeopleKey),
-           let decoded = try? JSONDecoder().decode([TrackedPerson].self, from: data) {
-            self.manualAdditions = decoded
-            self.trackedPeople = decoded
+            let decoded = try? JSONDecoder().decode([TrackedPerson].self, from: data)
+        {
+            loadedManual = decoded
+        } else {
+            loadedManual = []
         }
 
+        let loadedDismissed: [String: Int64]
         if let data = userDefaults.data(forKey: dismissedTimestampsKey),
-           let decoded = try? JSONDecoder().decode([String: Int64].self, from: data) {
-            self.dismissedTimestamps = decoded
+            let decoded = try? JSONDecoder().decode([String: Int64].self, from: data)
+        {
+            loadedDismissed = decoded
+        } else {
+            loadedDismissed = [:]
         }
 
+        let loadedBaseline: Int64
         if let number = userDefaults.object(forKey: trackingBaselineKey) as? NSNumber {
-            self.trackingBaselineRawAppleDate = number.int64Value
+            loadedBaseline = number.int64Value
+        } else {
+            loadedBaseline = 0
         }
 
+        let loadedGrace: Double
         if userDefaults.object(forKey: gracePeriodKey) != nil {
-            self.gracePeriodHours = userDefaults.double(forKey: gracePeriodKey)
+            loadedGrace = userDefaults.double(forKey: gracePeriodKey)
+        } else {
+            loadedGrace = graceFallback
         }
 
+        let loadedQuiet: QuietHoursSchedule
         if let data = userDefaults.data(forKey: quietHoursKey),
-           let decoded = try? JSONDecoder().decode(QuietHoursSchedule.self, from: data) {
-            self.quietHoursSchedule = decoded
+            let decoded = try? JSONDecoder().decode(QuietHoursSchedule.self, from: data)
+        {
+            loadedQuiet = decoded
+        } else {
+            loadedQuiet = quietFallback
         }
 
+        let loadedOnlyTrackContacts: Bool
         if userDefaults.object(forKey: onlyTrackContactsKey) != nil {
-            self.onlyTrackContacts = userDefaults.bool(forKey: onlyTrackContactsKey)
+            loadedOnlyTrackContacts = userDefaults.bool(forKey: onlyTrackContactsKey)
+        } else {
+            loadedOnlyTrackContacts = false
         }
+
+        manualAdditions = loadedManual
+        trackedPeople = loadedManual
+        excludedPersonIds = loadedExcluded
+        dismissedTimestamps = loadedDismissed
+        trackingBaselineRawAppleDate = loadedBaseline
+        gracePeriodHours = loadedGrace
+        quietHoursSchedule = loadedQuiet
+        trackAllByDefault = loadedTrackAll
+        onlyTrackContacts = loadedOnlyTrackContacts
 
         updateQuietHoursState()
     }
@@ -176,12 +224,6 @@ public final class OpaqViewModel {
 
     private func saveManualAdditions() {
         if let encoded = try? JSONEncoder().encode(manualAdditions) {
-            userDefaults.set(encoded, forKey: trackedPeopleKey)
-        }
-    }
-
-    private func saveTrackedPeople() {
-        if let encoded = try? JSONEncoder().encode(trackedPeople) {
             userDefaults.set(encoded, forKey: trackedPeopleKey)
         }
     }
@@ -265,28 +307,24 @@ public final class OpaqViewModel {
 
     // MARK: - Permissions & Setup
 
-    public func performLaunchPermissionsCheck() {
+    func performLaunchPermissionsCheck() {
         Task { @MainActor in
-            // 1. Actively request Contacts permission if not determined (triggers macOS system prompt)
             let contactsGranted = await contactManager.requestAccessIfNeeded()
             if contactsGranted {
                 self.contactManager.reloadContacts()
             }
 
-            // 2. Re-evaluate permission status
             self.checkPermissions()
 
-            // 3. If either permission is missing, open Settings so setup is a normal window
             if !self.permissions.hasAllPermissions {
                 self.openSettingsWindow(pane: .general)
             }
 
-            // 4. Refresh data
             self.refresh()
         }
     }
 
-    public func checkPermissions() {
+    func checkPermissions() {
         let fda = databaseService.checkFullDiskAccess()
         let contacts = contactManager.checkAuthorizationStatus()
         let next = PermissionStatus(fullDiskAccess: fda, contactsAccess: contacts)
@@ -295,7 +333,7 @@ public final class OpaqViewModel {
         }
     }
 
-    public func retryConnection() {
+    func retryConnection() {
         Task { @MainActor in
             if !self.permissions.contactsAccess {
                 _ = await self.contactManager.requestAccessIfNeeded()
@@ -308,7 +346,7 @@ public final class OpaqViewModel {
         }
     }
 
-    public func requestContactsAccess() {
+    func requestContactsAccess() {
         Task { @MainActor in
             let granted = await contactManager.requestOrOpenSettings()
             self.permissions.contactsAccess = granted
@@ -320,13 +358,13 @@ public final class OpaqViewModel {
         }
     }
 
-    public func openFullDiskAccessSettings() {
+    func openFullDiskAccessSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
             NSWorkspace.shared.open(url)
         }
     }
 
-    public func openContactsSettings() {
+    func openContactsSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts") {
             NSWorkspace.shared.open(url)
         }
@@ -334,11 +372,11 @@ public final class OpaqViewModel {
 
     // MARK: - Launch at Login
 
-    public var canConfigureLaunchAtLogin: Bool {
+    var canConfigureLaunchAtLogin: Bool {
         Bundle.main.bundleURL.pathExtension == "app"
     }
 
-    public func refreshLaunchAtLoginStatus() {
+    func refreshLaunchAtLoginStatus() {
         guard canConfigureLaunchAtLogin else {
             launchesAtLogin = false
             launchAtLoginNeedsApproval = false
@@ -362,7 +400,7 @@ public final class OpaqViewModel {
         }
     }
 
-    public func setLaunchesAtLogin(_ enabled: Bool) {
+    func setLaunchesAtLogin(_ enabled: Bool) {
         launchAtLoginMessage = nil
 
         guard canConfigureLaunchAtLogin else {
@@ -397,7 +435,7 @@ public final class OpaqViewModel {
         }
     }
 
-    public func openLoginItemsSettings() {
+    func openLoginItemsSettings() {
         SMAppService.openSystemSettingsLoginItems()
     }
 
@@ -415,7 +453,8 @@ public final class OpaqViewModel {
 
     private func launchAtLoginFailure(for error: Error) -> (message: String?, needsApproval: Bool) {
         let nsError = error as NSError
-        let isServiceManagementError = nsError.domain == SMAppServiceErrorDomain
+        let isServiceManagementError =
+            nsError.domain == SMAppServiceErrorDomain
             || nsError.domain.localizedCaseInsensitiveContains("ServiceManagement")
         guard isServiceManagementError else {
             return (error.localizedDescription, false)
@@ -446,100 +485,126 @@ public final class OpaqViewModel {
 
     // MARK: - Refresh Data
 
-    public func refresh() {
+    func refresh() {
         if isRefreshing {
             refreshPending = true
             return
         }
         isRefreshing = true
-        refreshPending = false
+        startRefresh()
+    }
 
+    private func startRefresh() {
         checkPermissions()
         updateQuietHoursState()
 
-        let currentManual = self.manualAdditions
-        let currentExcludedIds = self.excludedPersonIds
-        let isTrackAll = self.trackAllByDefault
-        let contactsOnly = self.onlyTrackContacts
+        let currentManual = manualAdditions
+        let currentExcludedIds = excludedPersonIds
+        let isTrackAll = trackAllByDefault
+        let contactsOnly = onlyTrackContacts
         let fdaGranted = permissions.fullDiskAccess
 
         Task { [databaseService, contactManager] in
-            let (newTracked, newExcluded, suggestions, latestMap) = await Task.detached(priority: .userInitiated) { () -> ([TrackedPerson], [TrackedPerson], [SuggestedPerson], [String: LatestMessageInfo]) in
+            let outcome = await Task.detached(priority: .userInitiated) { () -> RefreshOutcome in
                 let isEligible: (TrackedPerson) -> Bool = { person in
                     contactManager.shouldTrack(person, onlyTrackContacts: contactsOnly)
                 }
 
-                var finalTracked: [TrackedPerson] = []
-                var finalExcluded: [TrackedPerson] = []
-                var sugg: [SuggestedPerson] = []
-                var map: [String: LatestMessageInfo] = [:]
+                do {
+                    var finalTracked: [TrackedPerson] = []
+                    var finalExcluded: [TrackedPerson] = []
+                    var sugg: [SuggestedPerson] = []
+                    var map: [String: LatestMessageInfo] = [:]
 
-                if fdaGranted {
-                    if isTrackAll {
-                        let allRecords = databaseService.fetchAllChatPeople(contactManager: contactManager)
-                        var seenIds = Set<String>()
+                    if fdaGranted {
+                        if isTrackAll {
+                            let allRecords = try databaseService.fetchAllChatPeople(contactManager: contactManager)
+                            var seenIds = Set<String>()
 
-                        for record in allRecords where isEligible(record.person) {
-                            seenIds.insert(record.person.id)
-                            if currentExcludedIds.contains(record.person.id) {
-                                finalExcluded.append(record.person)
-                            } else {
-                                finalTracked.append(record.person)
-                            }
-                        }
-
-                        for person in currentManual where isEligible(person) {
-                            if !seenIds.contains(person.id) {
-                                seenIds.insert(person.id)
-                                if currentExcludedIds.contains(person.id) {
-                                    finalExcluded.append(person)
+                            for record in allRecords where isEligible(record.person) {
+                                seenIds.insert(record.person.id)
+                                if currentExcludedIds.contains(record.person.id) {
+                                    finalExcluded.append(record.person)
                                 } else {
-                                    finalTracked.append(person)
+                                    finalTracked.append(record.person)
                                 }
                             }
-                        }
 
-                        // Batch fetch Query B for all tracked people
-                        map = databaseService.fetchLatestMessages(for: finalTracked)
+                            for person in currentManual where isEligible(person) {
+                                if !seenIds.contains(person.id) {
+                                    seenIds.insert(person.id)
+                                    if currentExcludedIds.contains(person.id) {
+                                        finalExcluded.append(person)
+                                    } else {
+                                        finalTracked.append(person)
+                                    }
+                                }
+                            }
+
+                            map = try databaseService.fetchLatestMessages(for: finalTracked)
+                        } else {
+                            finalTracked = currentManual.filter(isEligible)
+                            map = try databaseService.fetchLatestMessages(for: finalTracked)
+                            sugg = try databaseService.fetchTimeDecayedSuggestions(
+                                trackedPeople: finalTracked,
+                                contactManager: contactManager
+                            ).filter { isEligible($0.person) }
+                        }
                     } else {
                         finalTracked = currentManual.filter(isEligible)
-                        map = databaseService.fetchLatestMessages(for: finalTracked)
-                        sugg = databaseService.fetchTimeDecayedSuggestions(
-                            trackedPeople: finalTracked,
-                            contactManager: contactManager
-                        ).filter { isEligible($0.person) }
                     }
-                } else {
-                    finalTracked = currentManual.filter(isEligible)
-                }
 
-                return (finalTracked, finalExcluded, sugg, map)
+                    return .success(
+                        RefreshSnapshot(
+                            tracked: finalTracked,
+                            excluded: finalExcluded,
+                            suggestions: sugg,
+                            latest: map
+                        ))
+                } catch let failure as DatabaseFailure {
+                    return .failure(failure.message)
+                } catch {
+                    return .failure(error.localizedDescription)
+                }
             }.value
 
-            if self.refreshPending {
-                self.isRefreshing = false
-                self.refresh()
-                return
+            switch outcome {
+            case .success(let snapshot):
+                self.applySnapshot(snapshot, fullDiskAccess: fdaGranted)
+            case .failure(let message):
+                self.databaseError = message
             }
-
-            if Self.peopleChanged(trackedPeople, newTracked) {
-                self.trackedPeople = newTracked
-            }
-            if Self.peopleChanged(excludedPeople, newExcluded) {
-                self.excludedPeople = newExcluded
-            }
-            if Self.suggestionsChanged(suggestedPeople, suggestions) {
-                self.suggestedPeople = suggestions
-            }
-            self.rawLatestMessages = latestMap
-            if fdaGranted {
-                self.ensureTrackingBaselineIfNeeded()
-                self.seedFirstSeenDismissedTimestamps()
-            }
-            self.recalculateUnrepliedStatus()
-            self.lastUpdated = Date()
-            self.isRefreshing = false
+            self.completeRefresh()
         }
+    }
+
+    private func completeRefresh() {
+        if refreshPending {
+            refreshPending = false
+            startRefresh()
+        } else {
+            isRefreshing = false
+        }
+    }
+
+    private func applySnapshot(_ snapshot: RefreshSnapshot, fullDiskAccess: Bool) {
+        databaseError = nil
+        if Self.peopleChanged(trackedPeople, snapshot.tracked) {
+            trackedPeople = snapshot.tracked
+        }
+        if Self.peopleChanged(excludedPeople, snapshot.excluded) {
+            excludedPeople = snapshot.excluded
+        }
+        if Self.suggestionsChanged(suggestedPeople, snapshot.suggestions) {
+            suggestedPeople = snapshot.suggestions
+        }
+        rawLatestMessages = snapshot.latest
+        if fullDiskAccess {
+            ensureTrackingBaselineIfNeeded()
+            seedFirstSeenDismissedTimestamps()
+        }
+        recalculateUnrepliedStatus()
+        lastUpdated = Date()
     }
 
     /// Drops unsaved handles from the visible lists immediately. Stored manual additions
@@ -566,55 +631,27 @@ public final class OpaqViewModel {
     // MARK: - Ghosting & Unreplied Logic
 
     private func recalculateUnrepliedStatus() {
-        let nowUnix = Date().timeIntervalSince1970
-        let gracePeriodSeconds = gracePeriodHours * 3600.0
-
-        var unrepliedList: [UnrepliedPerson] = []
-
-        for person in trackedPeople {
-            guard let latest = rawLatestMessages[person.id] else {
-                continue
-            }
-
-            // Must be from them (is_from_me == 0)
-            guard !latest.isFromMe else {
-                continue
-            }
-
-            // Must be newer than Conversation Ended and the first-connect tracking baseline
-            let dismissedTimestamp = dismissedTimestamps[person.id] ?? 0
-            let effectiveFloor = max(dismissedTimestamp, trackingBaselineRawAppleDate)
-            guard latest.rawAppleDate > effectiveFloor else {
-                continue
-            }
-
-            let waitTime = max(0, nowUnix - latest.unixTimestamp)
-            let formatted = Self.formatDuration(seconds: waitTime)
-            let inGrace = waitTime < gracePeriodSeconds
-
-            let unreplied = UnrepliedPerson(
-                person: person,
-                latestMessage: latest,
-                waitTimeSeconds: waitTime,
-                formattedDuration: formatted,
-                isInGracePeriod: inGrace,
-                primaryHandle: person.primaryHandle
-            )
-            unrepliedList.append(unreplied)
-        }
-
-        // Sort ascending by unix_timestamp (longest waiting / oldest message is #1 at top)
-        unrepliedList.sort { $0.latestMessage.unixTimestamp < $1.latestMessage.unixTimestamp }
-
-        if unrepliedList != unrepliedPeople {
-            unrepliedPeople = unrepliedList
+        let next = ConversationStatus.unreplied(
+            people: trackedPeople,
+            latestMessages: rawLatestMessages,
+            dismissedTimestamps: dismissedTimestamps,
+            trackingBaselineRawAppleDate: trackingBaselineRawAppleDate,
+            now: Date(),
+            gracePeriodHours: gracePeriodHours
+        )
+        if next != unrepliedPeople {
+            unrepliedPeople = next
         }
     }
 
     private static func peopleChanged(_ current: [TrackedPerson], _ next: [TrackedPerson]) -> Bool {
         guard current.count == next.count else { return true }
         for (lhs, rhs) in zip(current, next) {
-            if lhs.id != rhs.id || lhs.displayName != rhs.displayName || lhs.handles != rhs.handles {
+            if lhs.id != rhs.id
+                || lhs.displayName != rhs.displayName
+                || lhs.handles != rhs.handles
+                || lhs.avatarData != rhs.avatarData
+            {
                 return true
             }
         }
@@ -626,16 +663,31 @@ public final class OpaqViewModel {
         for (lhs, rhs) in zip(current, next) {
             if lhs.person.id != rhs.person.id
                 || lhs.person.displayName != rhs.person.displayName
-                || lhs.totalMessages != rhs.totalMessages {
+                || lhs.totalMessages != rhs.totalMessages
+            {
                 return true
             }
         }
         return false
     }
 
+    // MARK: - Contacts
+
+    func searchContacts(query: String, limit: Int = 40) -> [ContactCard] {
+        contactManager.searchContacts(query: query, limit: limit)
+    }
+
+    func trackedPerson(from card: ContactCard) -> TrackedPerson {
+        contactManager.makeTrackedPerson(from: card)
+    }
+
+    func trackedPerson(manualHandle: String) -> TrackedPerson {
+        contactManager.makeTrackedPerson(manualHandle: manualHandle)
+    }
+
     // MARK: - Actions
 
-    public func addTrackedPerson(_ person: TrackedPerson) {
+    func addTrackedPerson(_ person: TrackedPerson) {
         if !contactManager.shouldTrack(person, onlyTrackContacts: onlyTrackContacts) {
             return
         }
@@ -653,7 +705,7 @@ public final class OpaqViewModel {
         refresh()
     }
 
-    public func removeTrackedPerson(id: String) {
+    func removeTrackedPerson(id: String) {
         if trackAllByDefault {
             excludedPersonIds.insert(id)
             saveExcludedPersonIds()
@@ -668,54 +720,46 @@ public final class OpaqViewModel {
         refresh()
     }
 
-    public func dismissConversation(personId: String) {
+    func dismissConversation(personId: String) {
         guard let latest = rawLatestMessages[personId] else { return }
         dismissedTimestamps[personId] = latest.rawAppleDate
         saveDismissedTimestamps()
         recalculateUnrepliedStatus()
     }
 
-    public func openMessages(for handle: String) {
+    func openMessages(for handle: String) {
         let trimmed = handle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         if let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-           let url = URL(string: "imessage://\(encoded)") {
+            let url = URL(string: "imessage://\(encoded)")
+        {
             NSWorkspace.shared.open(url)
         }
     }
 
-    public func openSettingsWindow(pane: SettingsPane? = nil) {
+    func openSettingsWindow(pane: SettingsPane? = nil) {
         if let pane {
             selectedSettingsPane = pane
         }
-        if let open = SettingsOpener.open {
-            open()
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                SettingsOpener.open?()
-                NSApp.activate(ignoringOtherApps: true)
-                _ = self
-            }
-        }
+        SettingsWindowController.show(self)
         NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - Duration Formatting
 
-    public static func formatDuration(seconds: Double) -> String {
-        if seconds < 60 {
-            return "now"
-        } else if seconds < 3600 {
-            let m = Int(seconds / 60)
-            return "\(m)m"
-        } else if seconds < 86400 {
-            let h = Int(seconds / 3600)
-            let m = Int((seconds.truncatingRemainder(dividingBy: 3600)) / 60)
-            return m > 0 ? "\(h)h \(m)m" : "\(h)h"
-        } else {
-            let d = Int(seconds / 86400)
-            let h = Int((seconds.truncatingRemainder(dividingBy: 86400)) / 3600)
-            return h > 0 ? "\(d)d \(h)h" : "\(d)d"
-        }
+    static func formatDuration(seconds: Double) -> String {
+        ConversationStatus.formatDuration(seconds: seconds)
     }
+}
+
+private struct RefreshSnapshot: Sendable {
+    var tracked: [TrackedPerson]
+    var excluded: [TrackedPerson]
+    var suggestions: [SuggestedPerson]
+    var latest: [String: LatestMessageInfo]
+}
+
+private enum RefreshOutcome: Sendable {
+    case success(RefreshSnapshot)
+    case failure(String)
 }

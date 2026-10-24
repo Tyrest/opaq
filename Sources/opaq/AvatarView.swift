@@ -1,20 +1,20 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
-public struct AvatarView: View {
-    public let name: String
-    public let avatarData: Data?
-    public let cacheKey: String?
-    public let size: CGFloat
+struct AvatarView: View {
+    let name: String
+    let avatarData: Data?
+    let cacheKey: String?
+    let size: CGFloat
 
-    public init(name: String, avatarData: Data? = nil, cacheKey: String? = nil, size: CGFloat = 32) {
+    init(name: String, avatarData: Data? = nil, cacheKey: String? = nil, size: CGFloat = 32) {
         self.name = name
         self.avatarData = avatarData
         self.cacheKey = cacheKey
         self.size = size
     }
 
-    public var body: some View {
+    var body: some View {
         Group {
             if let nsImage = cachedImage {
                 Image(nsImage: nsImage)

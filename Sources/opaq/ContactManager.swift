@@ -1,9 +1,9 @@
-import Foundation
-import Contacts
 import AppKit
+import Contacts
+import Foundation
 
-public final class ContactManager: @unchecked Sendable {
-    public static let shared = ContactManager()
+final class ContactManager: @unchecked Sendable {
+    static let shared = ContactManager()
 
     private let store = CNContactStore()
     private let lock = NSLock()
@@ -14,7 +14,7 @@ public final class ContactManager: @unchecked Sendable {
     private var last10PhoneToCard: [String: ContactCard] = [:]
     private var emailToCard: [String: ContactCard] = [:]
 
-    public init() {
+    init() {
         if checkAuthorizationStatus() {
             reloadContacts()
         }
@@ -22,21 +22,16 @@ public final class ContactManager: @unchecked Sendable {
 
     // MARK: - Authorization
 
-    public func checkAuthorizationStatus() -> Bool {
-        let status = CNContactStore.authorizationStatus(for: .contacts)
-        return status == .authorized
-    }
-
-    public func authorizationStatus() -> CNAuthorizationStatus {
-        CNContactStore.authorizationStatus(for: .contacts)
+    func checkAuthorizationStatus() -> Bool {
+        hasContactsAccess(CNContactStore.authorizationStatus(for: .contacts))
     }
 
     @discardableResult
-    public func requestAccessIfNeeded() async -> Bool {
+    func requestAccessIfNeeded() async -> Bool {
         let status = CNContactStore.authorizationStatus(for: .contacts)
         if status == .notDetermined {
             return await requestAccess()
-        } else if status == .authorized {
+        } else if hasContactsAccess(status) {
             reloadContacts()
             return true
         }
@@ -44,22 +39,30 @@ public final class ContactManager: @unchecked Sendable {
     }
 
     @discardableResult
-    public func requestAccess() async -> Bool {
+    func requestAccess() async -> Bool {
         do {
             let granted = try await store.requestAccess(for: .contacts)
-            if granted {
+            if granted || checkAuthorizationStatus() {
                 reloadContacts()
+                return true
             }
-            return granted
+            return false
         } catch {
+            if checkAuthorizationStatus() {
+                reloadContacts()
+                return true
+            }
             return false
         }
     }
 
-    public func requestOrOpenSettings() async -> Bool {
+    func requestOrOpenSettings() async -> Bool {
         let status = CNContactStore.authorizationStatus(for: .contacts)
         if status == .notDetermined {
             return await requestAccess()
+        } else if hasContactsAccess(status) {
+            reloadContacts()
+            return true
         } else if status == .denied || status == .restricted {
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts") {
                 await MainActor.run {
@@ -68,24 +71,31 @@ public final class ContactManager: @unchecked Sendable {
             }
             return false
         } else {
-            reloadContacts()
-            return true
+            return false
         }
+    }
+
+    /// `CNAuthorizationStatusLimited` is raw value 4. The Swift case is marked
+    /// unavailable on macOS, but a limited grant must still count as access.
+    private static let limitedAuthorization = CNAuthorizationStatus(rawValue: 4)
+
+    private func hasContactsAccess(_ status: CNAuthorizationStatus) -> Bool {
+        status == .authorized || status == Self.limitedAuthorization
     }
 
     // MARK: - Normalization Helpers
 
-    public static func isEmail(_ string: String) -> Bool {
+    static func isEmail(_ string: String) -> Bool {
         string.contains("@") && string.contains(".")
     }
 
-    public static func normalizeEmail(_ email: String) -> String {
+    static func normalizeEmail(_ email: String) -> String {
         email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     /// Strips non-digit characters except leading '+'.
     /// Returns the exact normalized string and the last 10 digits (if applicable).
-    public static func normalizePhone(_ phone: String) -> (exact: String, last10: String?) {
+    static func normalizePhone(_ phone: String) -> (exact: String, last10: String?) {
         let trimmed = phone.trimmingCharacters(in: .whitespacesAndNewlines)
         var exact = ""
         var digitsOnly = ""
@@ -113,7 +123,7 @@ public final class ContactManager: @unchecked Sendable {
     }
 
     /// Normalizes a handle whether it is an email or phone number.
-    public static func normalizeHandle(_ handle: String) -> String {
+    static func normalizeHandle(_ handle: String) -> String {
         if isEmail(handle) {
             return normalizeEmail(handle)
         } else {
@@ -123,7 +133,7 @@ public final class ContactManager: @unchecked Sendable {
 
     // MARK: - Cache & Fetching
 
-    public func reloadContacts() {
+    func reloadContacts() {
         guard checkAuthorizationStatus() else { return }
 
         let keysToFetch: [CNKeyDescriptor] = [
@@ -132,7 +142,7 @@ public final class ContactManager: @unchecked Sendable {
             CNContactFamilyNameKey as CNKeyDescriptor,
             CNContactThumbnailImageDataKey as CNKeyDescriptor,
             CNContactPhoneNumbersKey as CNKeyDescriptor,
-            CNContactEmailAddressesKey as CNKeyDescriptor
+            CNContactEmailAddressesKey as CNKeyDescriptor,
         ]
 
         let request = CNContactFetchRequest(keysToFetch: keysToFetch)
@@ -194,13 +204,13 @@ public final class ContactManager: @unchecked Sendable {
             lock.unlock()
 
         } catch {
-            // Keep existing cache on failure
+            Log.contacts.error("failed to enumerate contacts: \(error.localizedDescription, privacy: .public)")
         }
     }
 
     // MARK: - Resolution & Lookup
 
-    public func findContact(for handle: String) -> ContactCard? {
+    func findContact(for handle: String) -> ContactCard? {
         lock.lock()
         defer { lock.unlock() }
 
@@ -219,7 +229,7 @@ public final class ContactManager: @unchecked Sendable {
         }
     }
 
-    public func findContact(byId id: String) -> ContactCard? {
+    func findContact(byId id: String) -> ContactCard? {
         lock.lock()
         defer { lock.unlock() }
         return idToCard[id]
@@ -228,14 +238,14 @@ public final class ContactManager: @unchecked Sendable {
     /// A person is associated with a contact when their id is a `CNContact` identifier
     /// currently in the cache. Handles with no matching contact card use the normalized
     /// handle as their id and return false.
-    public func isSavedContact(id: String) -> Bool {
+    func isSavedContact(id: String) -> Bool {
         findContact(byId: id) != nil
     }
 
     /// Contacts-only tracking keeps saved contacts and skips raw phone numbers and emails.
     /// When the cache is still empty, previously stored contact ids are kept and handle-shaped
     /// ids are still skipped.
-    public func shouldTrack(_ person: TrackedPerson, onlyTrackContacts: Bool) -> Bool {
+    func shouldTrack(_ person: TrackedPerson, onlyTrackContacts: Bool) -> Bool {
         guard onlyTrackContacts else { return true }
         guard !person.id.isEmpty else { return false }
         if isSavedContact(id: person.id) { return true }
@@ -260,14 +270,7 @@ public final class ContactManager: @unchecked Sendable {
         }
     }
 
-    public func fetchAvatarData(for contactId: String) -> Data? {
-        if let card = findContact(byId: contactId) {
-            return card.avatarData
-        }
-        return nil
-    }
-
-    public func searchContacts(query: String, limit: Int = 40) -> [ContactCard] {
+    func searchContacts(query: String, limit: Int = 40) -> [ContactCard] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
         guard limit > 0 else { return [] }
@@ -312,21 +315,32 @@ public final class ContactManager: @unchecked Sendable {
 
     // MARK: - TrackedPerson Factory
 
-    public func makeTrackedPerson(from card: ContactCard, extraHandles: [String] = []) -> TrackedPerson {
-        var handlesSet = Set<String>()
-        for h in card.phoneNumbers { handlesSet.insert(h) }
-        for h in card.emailAddresses { handlesSet.insert(h) }
-        for h in extraHandles { handlesSet.insert(h) }
+    func makeTrackedPerson(from card: ContactCard, extraHandles: [String] = []) -> TrackedPerson {
+        var handles: [String] = []
+        func appendUnique(_ handle: String) {
+            if !handles.contains(handle) {
+                handles.append(handle)
+            }
+        }
+        for handle in card.phoneNumbers {
+            appendUnique(handle)
+        }
+        for handle in card.emailAddresses {
+            appendUnique(handle)
+        }
+        for handle in extraHandles {
+            appendUnique(handle)
+        }
 
         return TrackedPerson(
             id: card.id,
             displayName: card.displayName,
-            handles: Array(handlesSet),
+            handles: handles,
             avatarData: card.avatarData
         )
     }
 
-    public func makeTrackedPerson(manualHandle: String) -> TrackedPerson {
+    func makeTrackedPerson(manualHandle: String) -> TrackedPerson {
         let trimmed = manualHandle.trimmingCharacters(in: .whitespacesAndNewlines)
         if let card = findContact(for: trimmed) {
             return makeTrackedPerson(from: card, extraHandles: [trimmed])

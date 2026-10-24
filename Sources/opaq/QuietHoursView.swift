@@ -1,6 +1,6 @@
 import SwiftUI
 
-public struct QuietHoursView: View {
+struct QuietHoursView: View {
     @Bindable var viewModel: OpaqViewModel
 
     private let weekdayDays: [(id: Int, label: String, fullName: String)] = [
@@ -10,10 +10,10 @@ public struct QuietHoursView: View {
         (5, "Thu", "Thursday"),
         (6, "Fri", "Friday"),
         (7, "Sat", "Saturday"),
-        (1, "Sun", "Sunday")
+        (1, "Sun", "Sunday"),
     ]
 
-    public init(viewModel: OpaqViewModel) {
+    init(viewModel: OpaqViewModel) {
         self.viewModel = viewModel
     }
 
@@ -47,7 +47,7 @@ public struct QuietHoursView: View {
         )
     }
 
-    public var body: some View {
+    var body: some View {
         Form {
             Section {
                 Toggle(isOn: $viewModel.quietHoursSchedule.isEnabled) {
@@ -65,7 +65,7 @@ public struct QuietHoursView: View {
                 } icon: {
                     Image(systemName: viewModel.isQuietHoursActive ? "moon.fill" : "moon")
                 }
-                .foregroundStyle(viewModel.isQuietHoursActive ? Color.green : Color.secondary)
+                .foregroundStyle(viewModel.isQuietHoursActive ? Color.accentColor : Color.secondary)
             }
 
             Section {
@@ -76,6 +76,7 @@ public struct QuietHoursView: View {
                             .disabled(!viewModel.quietHoursSchedule.isEnabled)
                             .help(day.fullName)
                             .accessibilityLabel(day.fullName)
+                            .frame(maxWidth: .infinity)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .center)

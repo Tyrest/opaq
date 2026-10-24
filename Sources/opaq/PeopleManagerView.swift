@@ -1,11 +1,11 @@
 import SwiftUI
 
-public struct PeopleManagerView: View {
+struct PeopleManagerView: View {
     @Bindable var viewModel: OpaqViewModel
     @State private var searchText: String = ""
     @State private var searchResults: [ContactCard] = []
 
-    public init(viewModel: OpaqViewModel) {
+    init(viewModel: OpaqViewModel) {
         self.viewModel = viewModel
     }
 
@@ -13,7 +13,7 @@ public struct PeopleManagerView: View {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    public var body: some View {
+    var body: some View {
         List {
             if isSearching {
                 searchResultsSection
@@ -32,7 +32,7 @@ public struct PeopleManagerView: View {
         .listStyle(.inset)
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search contacts")
         .onChange(of: searchText) { _, newValue in
-            searchResults = ContactManager.shared.searchContacts(query: newValue, limit: 40)
+            searchResults = viewModel.searchContacts(query: newValue, limit: 40)
         }
     }
 
@@ -57,7 +57,7 @@ public struct PeopleManagerView: View {
 
                     if !viewModel.onlyTrackContacts {
                         Button("Track Directly") {
-                            let person = ContactManager.shared.makeTrackedPerson(manualHandle: query)
+                            let person = viewModel.trackedPerson(manualHandle: query)
                             viewModel.addTrackedPerson(person)
                             searchText = ""
                         }
@@ -84,7 +84,7 @@ public struct PeopleManagerView: View {
                                 .foregroundStyle(.secondary)
                         } else {
                             Button("Track") {
-                                let person = ContactManager.shared.makeTrackedPerson(from: card)
+                                let person = viewModel.trackedPerson(from: card)
                                 viewModel.addTrackedPerson(person)
                             }
                             .buttonStyle(.bordered)
@@ -169,7 +169,8 @@ public struct PeopleManagerView: View {
     // MARK: - Currently Tracking
 
     private var currentlyTrackingSection: some View {
-        let title = viewModel.trackAllByDefault
+        let title =
+            viewModel.trackAllByDefault
             ? "Automatically Tracked (\(viewModel.trackedPeople.count))"
             : "Currently Tracking (\(viewModel.trackedPeople.count))"
 
