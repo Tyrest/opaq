@@ -10,6 +10,23 @@ struct PreferencesView: View {
     var body: some View {
         Form {
             Section {
+                Toggle("Launch at Login", isOn: launchAtLoginBinding)
+                    .disabled(!viewModel.canConfigureLaunchAtLogin)
+
+                if viewModel.launchAtLoginNeedsApproval {
+                    Button("Allow in System Settings") {
+                        viewModel.openLoginItemsSettings()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            } header: {
+                Text("Startup")
+            } footer: {
+                Text(launchAtLoginFooter)
+            }
+
+            Section {
                 HStack {
                     Text("Threshold")
                     Slider(
@@ -53,6 +70,32 @@ struct PreferencesView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear {
+            viewModel.refreshLaunchAtLoginStatus()
+        }
+    }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.launchesAtLogin },
+            set: { viewModel.setLaunchesAtLogin($0) }
+        )
+    }
+
+    private var launchAtLoginFooter: String {
+        if let message = viewModel.launchAtLoginMessage, !message.isEmpty {
+            return message
+        }
+        if !viewModel.canConfigureLaunchAtLogin {
+            return "Open opaq.app to turn this on."
+        }
+        if viewModel.launchAtLoginNeedsApproval {
+            return "Allow opaq in System Settings → General → Login Items. It will open on each login after that."
+        }
+        if viewModel.launchesAtLogin {
+            return "opaq opens in the menu bar whenever you log in to this Mac."
+        }
+        return "Turn this on to open opaq whenever you log in to this Mac."
     }
 
     private func permissionRow(

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ServiceManagement
 import SwiftUI
 
 @MainActor
@@ -48,6 +49,9 @@ final class OpaqViewModel {
     /// Chat.db read failure. Stays nil when Full Disk Access has not been granted.
     private(set) var databaseError: String?
     var selectedSettingsPane: SettingsPane = .people
+    private(set) var launchesAtLogin: Bool = false
+    private(set) var launchAtLoginNeedsApproval: Bool = false
+    private(set) var launchAtLoginMessage: String?
 
     // Derived lists
     var unrepliedPastGracePeriod: [UnrepliedPerson] {
@@ -73,6 +77,7 @@ final class OpaqViewModel {
     private var manualAdditions: [TrackedPerson] = []
     private var repeatingTimer: Timer?
     private var rawLatestMessages: [String: LatestMessageInfo] = [:]
+    private var launchAtLoginObserver: NSObjectProtocol?
     private var isLoadingPersistedState = false
     private var refreshPending = false
 
@@ -101,6 +106,8 @@ final class OpaqViewModel {
 
         loadPersistedState()
         checkPermissions()
+        refreshLaunchAtLoginStatus()
+        observeLaunchAtLoginChanges()
         startPeriodicTimer()
         startFileWatcher()
         performLaunchPermissionsCheck()
@@ -336,6 +343,119 @@ final class OpaqViewModel {
     func openContactsSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts") {
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    // MARK: - Launch at Login
+
+    var canConfigureLaunchAtLogin: Bool {
+        Bundle.main.bundleURL.pathExtension == "app"
+    }
+
+    func refreshLaunchAtLoginStatus() {
+        guard canConfigureLaunchAtLogin else {
+            launchesAtLogin = false
+            launchAtLoginNeedsApproval = false
+            return
+        }
+
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            launchesAtLogin = true
+            launchAtLoginNeedsApproval = false
+            launchAtLoginMessage = nil
+        case .requiresApproval:
+            launchesAtLogin = true
+            launchAtLoginNeedsApproval = true
+        case .notRegistered, .notFound:
+            launchesAtLogin = false
+            launchAtLoginNeedsApproval = false
+        @unknown default:
+            launchesAtLogin = false
+            launchAtLoginNeedsApproval = false
+        }
+    }
+
+    func setLaunchesAtLogin(_ enabled: Bool) {
+        launchAtLoginMessage = nil
+
+        guard canConfigureLaunchAtLogin else {
+            launchesAtLogin = false
+            launchAtLoginNeedsApproval = false
+            launchAtLoginMessage = "Open opaq.app to turn on launch at login."
+            return
+        }
+
+        var needsApprovalPrompt = false
+        do {
+            let service = SMAppService.mainApp
+            if enabled {
+                if service.status == .notRegistered || service.status == .notFound {
+                    try service.register()
+                }
+            } else if service.status == .enabled || service.status == .requiresApproval {
+                try service.unregister()
+            }
+        } catch {
+            let failure = launchAtLoginFailure(for: error)
+            launchAtLoginMessage = failure.message
+            needsApprovalPrompt = failure.needsApproval
+        }
+
+        refreshLaunchAtLoginStatus()
+        if needsApprovalPrompt {
+            launchAtLoginNeedsApproval = true
+        }
+        if enabled && launchAtLoginNeedsApproval {
+            openLoginItemsSettings()
+        }
+    }
+
+    func openLoginItemsSettings() {
+        SMAppService.openSystemSettingsLoginItems()
+    }
+
+    private func observeLaunchAtLoginChanges() {
+        launchAtLoginObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshLaunchAtLoginStatus()
+            }
+        }
+    }
+
+    private func launchAtLoginFailure(for error: Error) -> (message: String?, needsApproval: Bool) {
+        let nsError = error as NSError
+        let isServiceManagementError =
+            nsError.domain == SMAppServiceErrorDomain
+            || nsError.domain.localizedCaseInsensitiveContains("ServiceManagement")
+        guard isServiceManagementError else {
+            return (error.localizedDescription, false)
+        }
+
+        switch nsError.code {
+        case Int(kSMErrorAlreadyRegistered):
+            return (nil, false)
+        case Int(kSMErrorLaunchDeniedByUser):
+            return (
+                "macOS is waiting for approval before opaq can open at login.",
+                true
+            )
+        case Int(kSMErrorInvalidSignature):
+            return (
+                "macOS rejected this copy of opaq, so launch at login could not be saved.",
+                false
+            )
+        case Int(kSMErrorToolNotValid), Int(kSMErrorJobNotFound), Int(kSMErrorJobPlistNotFound):
+            return (
+                "macOS could not find this copy of opaq. Open opaq.app and try again.",
+                false
+            )
+        default:
+            return (error.localizedDescription, false)
         }
     }
 
