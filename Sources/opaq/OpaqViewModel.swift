@@ -22,6 +22,17 @@ final class OpaqViewModel {
             refresh()
         }
     }
+    /// When true, phone numbers and emails with no Contacts card are left untracked.
+    var onlyTrackContacts: Bool = false {
+        didSet {
+            guard !isLoadingPersistedState else { return }
+            saveOnlyTrackContacts()
+            if onlyTrackContacts {
+                applyContactsOnlyFilter()
+            }
+            refresh()
+        }
+    }
     private(set) var excludedPersonIds: Set<String> = []
     private(set) var excludedPeople: [TrackedPerson] = []
     private(set) var dismissedTimestamps: [String: Int64] = [:]
@@ -83,6 +94,7 @@ final class OpaqViewModel {
 
     private let userDefaults = UserDefaults.standard
     private let trackAllByDefaultKey = "com.local.opaq.trackAllByDefault"
+    private let onlyTrackContactsKey = "com.local.opaq.onlyTrackContacts"
     private let excludedPersonIdsKey = "com.local.opaq.excludedPersonIds"
     private let trackedPeopleKey = "com.local.opaq.trackedPeople"
     private let dismissedTimestampsKey = "com.local.opaq.dismissedTimestamps"
@@ -178,6 +190,13 @@ final class OpaqViewModel {
             loadedQuiet = quietFallback
         }
 
+        let loadedOnlyTrackContacts: Bool
+        if userDefaults.object(forKey: onlyTrackContactsKey) != nil {
+            loadedOnlyTrackContacts = userDefaults.bool(forKey: onlyTrackContactsKey)
+        } else {
+            loadedOnlyTrackContacts = false
+        }
+
         manualAdditions = loadedManual
         trackedPeople = loadedManual
         excludedPersonIds = loadedExcluded
@@ -186,12 +205,17 @@ final class OpaqViewModel {
         gracePeriodHours = loadedGrace
         quietHoursSchedule = loadedQuiet
         trackAllByDefault = loadedTrackAll
+        onlyTrackContacts = loadedOnlyTrackContacts
 
         updateQuietHoursState()
     }
 
     private func saveTrackAllByDefault() {
         userDefaults.set(trackAllByDefault, forKey: trackAllByDefaultKey)
+    }
+
+    private func saveOnlyTrackContacts() {
+        userDefaults.set(onlyTrackContacts, forKey: onlyTrackContactsKey)
     }
 
     private func saveExcludedPersonIds() {
@@ -477,10 +501,15 @@ final class OpaqViewModel {
         let currentManual = manualAdditions
         let currentExcludedIds = excludedPersonIds
         let isTrackAll = trackAllByDefault
+        let contactsOnly = onlyTrackContacts
         let fdaGranted = permissions.fullDiskAccess
 
         Task { [databaseService, contactManager] in
             let outcome = await Task.detached(priority: .userInitiated) { () -> RefreshOutcome in
+                let isEligible: (TrackedPerson) -> Bool = { person in
+                    contactManager.shouldTrack(person, onlyTrackContacts: contactsOnly)
+                }
+
                 do {
                     var finalTracked: [TrackedPerson] = []
                     var finalExcluded: [TrackedPerson] = []
@@ -492,7 +521,7 @@ final class OpaqViewModel {
                             let allRecords = try databaseService.fetchAllChatPeople(contactManager: contactManager)
                             var seenIds = Set<String>()
 
-                            for record in allRecords {
+                            for record in allRecords where isEligible(record.person) {
                                 seenIds.insert(record.person.id)
                                 if currentExcludedIds.contains(record.person.id) {
                                     finalExcluded.append(record.person)
@@ -501,7 +530,7 @@ final class OpaqViewModel {
                                 }
                             }
 
-                            for person in currentManual {
+                            for person in currentManual where isEligible(person) {
                                 if !seenIds.contains(person.id) {
                                     seenIds.insert(person.id)
                                     if currentExcludedIds.contains(person.id) {
@@ -514,15 +543,15 @@ final class OpaqViewModel {
 
                             map = try databaseService.fetchLatestMessages(for: finalTracked)
                         } else {
-                            finalTracked = currentManual
+                            finalTracked = currentManual.filter(isEligible)
                             map = try databaseService.fetchLatestMessages(for: finalTracked)
                             sugg = try databaseService.fetchTimeDecayedSuggestions(
                                 trackedPeople: finalTracked,
                                 contactManager: contactManager
-                            )
+                            ).filter { isEligible($0.person) }
                         }
                     } else {
-                        finalTracked = currentManual
+                        finalTracked = currentManual.filter(isEligible)
                     }
 
                     return .success(
@@ -576,6 +605,27 @@ final class OpaqViewModel {
         }
         recalculateUnrepliedStatus()
         lastUpdated = Date()
+    }
+
+    /// Drops unsaved handles from the visible lists immediately. Stored manual additions
+    /// stay put so turning the option off resumes them.
+    private func applyContactsOnlyFilter() {
+        let eligible: (TrackedPerson) -> Bool = {
+            self.contactManager.shouldTrack($0, onlyTrackContacts: true)
+        }
+        let filteredTracked = trackedPeople.filter(eligible)
+        if Self.peopleChanged(trackedPeople, filteredTracked) {
+            trackedPeople = filteredTracked
+        }
+        let filteredExcluded = excludedPeople.filter(eligible)
+        if Self.peopleChanged(excludedPeople, filteredExcluded) {
+            excludedPeople = filteredExcluded
+        }
+        let filteredSuggestions = suggestedPeople.filter { eligible($0.person) }
+        if Self.suggestionsChanged(suggestedPeople, filteredSuggestions) {
+            suggestedPeople = filteredSuggestions
+        }
+        recalculateUnrepliedStatus()
     }
 
     // MARK: - Ghosting & Unreplied Logic
@@ -638,6 +688,9 @@ final class OpaqViewModel {
     // MARK: - Actions
 
     func addTrackedPerson(_ person: TrackedPerson) {
+        if !contactManager.shouldTrack(person, onlyTrackContacts: onlyTrackContacts) {
+            return
+        }
         if excludedPersonIds.contains(person.id) {
             excludedPersonIds.remove(person.id)
             saveExcludedPersonIds()
