@@ -225,6 +225,41 @@ public final class ContactManager: @unchecked Sendable {
         return idToCard[id]
     }
 
+    /// A person is associated with a contact when their id is a `CNContact` identifier
+    /// currently in the cache. Handles with no matching contact card use the normalized
+    /// handle as their id and return false.
+    public func isSavedContact(id: String) -> Bool {
+        findContact(byId: id) != nil
+    }
+
+    /// Contacts-only tracking keeps saved contacts and skips raw phone numbers and emails.
+    /// When the cache is still empty, previously stored contact ids are kept and handle-shaped
+    /// ids are still skipped.
+    public func shouldTrack(_ person: TrackedPerson, onlyTrackContacts: Bool) -> Bool {
+        guard onlyTrackContacts else { return true }
+        guard !person.id.isEmpty else { return false }
+        if isSavedContact(id: person.id) { return true }
+
+        lock.lock()
+        let cacheLoaded = !contactsCache.isEmpty
+        lock.unlock()
+
+        if cacheLoaded { return false }
+        return !Self.isHandleIdentifier(person.id)
+    }
+
+    /// True for phone numbers and emails. Contact identifiers are opaque strings, not handles.
+    private static func isHandleIdentifier(_ id: String) -> Bool {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed.contains("@") { return true }
+        let digits = trimmed.filter(\.isNumber)
+        guard !digits.isEmpty else { return false }
+        return trimmed.allSatisfy { character in
+            character.isNumber || character == "+" || character == "-" || character == "("
+                || character == ")" || character == " " || character == "."
+        }
+    }
+
     public func fetchAvatarData(for contactId: String) -> Data? {
         if let card = findContact(byId: contactId) {
             return card.avatarData

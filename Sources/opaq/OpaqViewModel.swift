@@ -21,6 +21,16 @@ public final class OpaqViewModel {
             refresh()
         }
     }
+    /// When true, phone numbers and emails with no Contacts card are left untracked.
+    public var onlyTrackContacts: Bool = false {
+        didSet {
+            saveOnlyTrackContacts()
+            if onlyTrackContacts {
+                applyContactsOnlyFilter()
+            }
+            refresh()
+        }
+    }
     public private(set) var excludedPersonIds: Set<String> = []
     public private(set) var excludedPeople: [TrackedPerson] = []
     public private(set) var dismissedTimestamps: [String: Int64] = [:]
@@ -73,9 +83,11 @@ public final class OpaqViewModel {
     private var repeatingTimer: Timer?
     private var rawLatestMessages: [String: LatestMessageInfo] = [:]
     private var launchAtLoginObserver: NSObjectProtocol?
+    private var refreshPending = false
 
     private let userDefaults = UserDefaults.standard
     private let trackAllByDefaultKey = "com.local.opaq.trackAllByDefault"
+    private let onlyTrackContactsKey = "com.local.opaq.onlyTrackContacts"
     private let excludedPersonIdsKey = "com.local.opaq.excludedPersonIds"
     private let trackedPeopleKey = "com.local.opaq.trackedPeople"
     private let dismissedTimestampsKey = "com.local.opaq.dismissedTimestamps"
@@ -143,11 +155,19 @@ public final class OpaqViewModel {
             self.quietHoursSchedule = decoded
         }
 
+        if userDefaults.object(forKey: onlyTrackContactsKey) != nil {
+            self.onlyTrackContacts = userDefaults.bool(forKey: onlyTrackContactsKey)
+        }
+
         updateQuietHoursState()
     }
 
     private func saveTrackAllByDefault() {
         userDefaults.set(trackAllByDefault, forKey: trackAllByDefaultKey)
+    }
+
+    private func saveOnlyTrackContacts() {
+        userDefaults.set(onlyTrackContacts, forKey: onlyTrackContactsKey)
     }
 
     private func saveExcludedPersonIds() {
@@ -427,8 +447,12 @@ public final class OpaqViewModel {
     // MARK: - Refresh Data
 
     public func refresh() {
-        guard !isRefreshing else { return }
+        if isRefreshing {
+            refreshPending = true
+            return
+        }
         isRefreshing = true
+        refreshPending = false
 
         checkPermissions()
         updateQuietHoursState()
@@ -436,10 +460,15 @@ public final class OpaqViewModel {
         let currentManual = self.manualAdditions
         let currentExcludedIds = self.excludedPersonIds
         let isTrackAll = self.trackAllByDefault
+        let contactsOnly = self.onlyTrackContacts
         let fdaGranted = permissions.fullDiskAccess
 
         Task { [databaseService, contactManager] in
             let (newTracked, newExcluded, suggestions, latestMap) = await Task.detached(priority: .userInitiated) { () -> ([TrackedPerson], [TrackedPerson], [SuggestedPerson], [String: LatestMessageInfo]) in
+                let isEligible: (TrackedPerson) -> Bool = { person in
+                    contactManager.shouldTrack(person, onlyTrackContacts: contactsOnly)
+                }
+
                 var finalTracked: [TrackedPerson] = []
                 var finalExcluded: [TrackedPerson] = []
                 var sugg: [SuggestedPerson] = []
@@ -450,7 +479,7 @@ public final class OpaqViewModel {
                         let allRecords = databaseService.fetchAllChatPeople(contactManager: contactManager)
                         var seenIds = Set<String>()
 
-                        for record in allRecords {
+                        for record in allRecords where isEligible(record.person) {
                             seenIds.insert(record.person.id)
                             if currentExcludedIds.contains(record.person.id) {
                                 finalExcluded.append(record.person)
@@ -459,7 +488,7 @@ public final class OpaqViewModel {
                             }
                         }
 
-                        for person in currentManual {
+                        for person in currentManual where isEligible(person) {
                             if !seenIds.contains(person.id) {
                                 seenIds.insert(person.id)
                                 if currentExcludedIds.contains(person.id) {
@@ -473,19 +502,25 @@ public final class OpaqViewModel {
                         // Batch fetch Query B for all tracked people
                         map = databaseService.fetchLatestMessages(for: finalTracked)
                     } else {
-                        finalTracked = currentManual
+                        finalTracked = currentManual.filter(isEligible)
                         map = databaseService.fetchLatestMessages(for: finalTracked)
                         sugg = databaseService.fetchTimeDecayedSuggestions(
                             trackedPeople: finalTracked,
                             contactManager: contactManager
-                        )
+                        ).filter { isEligible($0.person) }
                     }
                 } else {
-                    finalTracked = currentManual
+                    finalTracked = currentManual.filter(isEligible)
                 }
 
                 return (finalTracked, finalExcluded, sugg, map)
             }.value
+
+            if self.refreshPending {
+                self.isRefreshing = false
+                self.refresh()
+                return
+            }
 
             if Self.peopleChanged(trackedPeople, newTracked) {
                 self.trackedPeople = newTracked
@@ -505,6 +540,27 @@ public final class OpaqViewModel {
             self.lastUpdated = Date()
             self.isRefreshing = false
         }
+    }
+
+    /// Drops unsaved handles from the visible lists immediately. Stored manual additions
+    /// stay put so turning the option off resumes them.
+    private func applyContactsOnlyFilter() {
+        let eligible: (TrackedPerson) -> Bool = {
+            self.contactManager.shouldTrack($0, onlyTrackContacts: true)
+        }
+        let filteredTracked = trackedPeople.filter(eligible)
+        if Self.peopleChanged(trackedPeople, filteredTracked) {
+            trackedPeople = filteredTracked
+        }
+        let filteredExcluded = excludedPeople.filter(eligible)
+        if Self.peopleChanged(excludedPeople, filteredExcluded) {
+            excludedPeople = filteredExcluded
+        }
+        let filteredSuggestions = suggestedPeople.filter { eligible($0.person) }
+        if Self.suggestionsChanged(suggestedPeople, filteredSuggestions) {
+            suggestedPeople = filteredSuggestions
+        }
+        recalculateUnrepliedStatus()
     }
 
     // MARK: - Ghosting & Unreplied Logic
@@ -580,6 +636,9 @@ public final class OpaqViewModel {
     // MARK: - Actions
 
     public func addTrackedPerson(_ person: TrackedPerson) {
+        if !contactManager.shouldTrack(person, onlyTrackContacts: onlyTrackContacts) {
+            return
+        }
         if excludedPersonIds.contains(person.id) {
             excludedPersonIds.remove(person.id)
             saveExcludedPersonIds()
