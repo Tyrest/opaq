@@ -8,6 +8,23 @@ struct PreferencesView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            preferencesForm
+
+            Spacer(minLength: 0)
+
+            Text(AppVersion.display)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 14)
+        }
+        .onAppear {
+            viewModel.refreshLaunchAtLoginStatus()
+        }
+    }
+
+    private var preferencesForm: some View {
         Form {
             Section {
                 Toggle("Launch at Login", isOn: launchAtLoginBinding)
@@ -70,9 +87,6 @@ struct PreferencesView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear {
-            viewModel.refreshLaunchAtLoginStatus()
-        }
     }
 
     private var launchAtLoginBinding: Binding<Bool> {
