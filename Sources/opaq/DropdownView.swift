@@ -19,8 +19,7 @@ struct DropdownView: View {
         contentArea
             .safeAreaBar(edge: .top) { headerBar }
             .safeAreaBar(edge: .bottom) { footerBar }
-            .frame(width: 360)
-            .frame(minHeight: dropdownMinHeight, maxHeight: dropdownMaxHeight)
+            .frame(width: 360, height: dropdownHeight)
             .onAppear {
                 viewModel.checkPermissions()
                 viewModel.refreshLaunchAtLoginStatus()
@@ -86,16 +85,8 @@ struct DropdownView: View {
         viewModel.databaseError == nil && viewModel.unrepliedPeople.isEmpty
     }
 
-    private var emptyDropdownHeight: CGFloat {
+    private var dropdownHeight: CGFloat {
         viewModel.permissions.hasAllPermissions ? 360 : 480
-    }
-
-    private var dropdownMinHeight: CGFloat {
-        showsEmptyInbox ? emptyDropdownHeight : 220
-    }
-
-    private var dropdownMaxHeight: CGFloat {
-        showsEmptyInbox ? emptyDropdownHeight : 520
     }
 
     // MARK: - Content
