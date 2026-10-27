@@ -23,9 +23,23 @@ struct SettingsWindowView: View {
         } detail: {
             destination(for: viewModel.selectedSettingsPane)
                 .navigationTitle(viewModel.selectedSettingsPane.title)
+                .toolbarTitleDisplayMode(.inline)
+                .toolbar {
+                    // People hosts a search field in this slot. Keep the same
+                    // toolbar height on the other panes so the traffic lights stay put.
+                    if viewModel.selectedSettingsPane != .people {
+                        ToolbarItem(placement: .primaryAction) {
+                            Color.clear
+                                .frame(width: 1, height: 24)
+                                .accessibilityHidden(true)
+                        }
+                        .sharedBackgroundVisibility(.hidden)
+                    }
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationSplitViewStyle(.balanced)
+        .toolbarBackground(.visible, for: .windowToolbar)
         .frame(minWidth: 780, minHeight: 520)
     }
 
