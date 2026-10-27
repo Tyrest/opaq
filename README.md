@@ -18,6 +18,8 @@ make format  # format Sources and Tests in place
 
 `make debug` builds without launching. `make format-check` lints Sources and Tests and exits non-zero when they drift from `.swift-format`.
 
+The app version lives in `Sources/opaq/AppVersion.swift`. Edit `AppVersion.marketing`, then run `make build` so the bundle version matches.
+
 ## Permissions
 
 Grant Full Disk Access so opaq can read `~/Library/Messages/chat.db`, and Contacts so it can match names and avatars. The app is read-only.

@@ -45,9 +45,16 @@ else
     echo "WARNING: Resources/opaq.icns is missing; the bundle will have no app icon."
 fi
 
-# 5. Write Info.plist
+# 5. Write Info.plist from AppVersion.marketing so the bundle matches the app.
 echo "==> Generating Info.plist..."
-cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
+VERSION_FILE="Sources/opaq/AppVersion.swift"
+MARKETING=$(sed -n 's/^[[:space:]]*static let marketing = "\([^"]*\)".*/\1/p' "$VERSION_FILE")
+if [ -z "$MARKETING" ]; then
+    echo "Error: could not read AppVersion.marketing from $VERSION_FILE"
+    exit 1
+fi
+echo "==> App version $MARKETING"
+cat << EOF > "$CONTENTS_DIR/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -65,9 +72,9 @@ cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
     <key>CFBundleIconFile</key>
     <string>opaq</string>
     <key>CFBundleVersion</key>
-    <string>1.0</string>
+    <string>${MARKETING}</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>${MARKETING}</string>
     <key>LSMinimumSystemVersion</key>
     <string>26.0</string>
     <key>LSUIElement</key>
