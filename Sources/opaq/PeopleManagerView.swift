@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct PeopleManagerView: View {
@@ -30,7 +31,12 @@ struct PeopleManagerView: View {
             }
         }
         .listStyle(.inset)
-        .searchable(text: $searchText, placement: .toolbar, prompt: "Search contacts")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                MacSearchField(text: $searchText, prompt: "Search contacts")
+                    .frame(width: 260, height: 24)
+            }
+        }
         .onChange(of: searchText) { _, newValue in
             searchResults = viewModel.searchContacts(query: newValue, limit: 40)
         }
@@ -137,7 +143,8 @@ struct PeopleManagerView: View {
     }
 
     private var trackEveryoneDetail: String {
-        let who = viewModel.onlyTrackContacts
+        let who =
+            viewModel.onlyTrackContacts
             ? "1-on-1 conversations with people saved in Contacts"
             : "all 1-on-1 iMessage conversations"
         return "Automatically monitor \(who). Only messages sent after you first connected opaq start the timer. You can exclude specific contacts below."
@@ -237,11 +244,13 @@ struct PeopleManagerView: View {
             if viewModel.suggestedPeople.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("No suggestions available")
-                    Text(viewModel.onlyTrackContacts
-                         ? "People saved in Contacts who you text will appear here."
-                         : "Top 1-on-1 conversations from iMessage will automatically appear here.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text(
+                        viewModel.onlyTrackContacts
+                            ? "People saved in Contacts who you text will appear here."
+                            : "Top 1-on-1 conversations from iMessage will automatically appear here."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
             } else {
                 ForEach(viewModel.suggestedPeople) { suggestion in
@@ -267,6 +276,47 @@ struct PeopleManagerView: View {
                     }
                 }
             }
+        }
+    }
+}
+
+private struct MacSearchField: NSViewRepresentable {
+    @Binding var text: String
+    var prompt: String
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = prompt
+        field.delegate = context.coordinator
+        field.sendsSearchStringImmediately = true
+        field.sendsWholeSearchString = false
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        context.coordinator.text = $text
+        if field.stringValue != text {
+            field.stringValue = text
+        }
+        if field.placeholderString != prompt {
+            field.placeholderString = prompt
+        }
+    }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var text: Binding<String>
+
+        init(text: Binding<String>) {
+            self.text = text
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSSearchField else { return }
+            text.wrappedValue = field.stringValue
         }
     }
 }
