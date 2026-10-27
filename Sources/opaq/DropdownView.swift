@@ -20,7 +20,7 @@ struct DropdownView: View {
             .safeAreaBar(edge: .top) { headerBar }
             .safeAreaBar(edge: .bottom) { footerBar }
             .frame(width: 360)
-            .frame(minHeight: 220, maxHeight: 520)
+            .frame(minHeight: dropdownMinHeight, maxHeight: dropdownMaxHeight)
             .onAppear {
                 viewModel.checkPermissions()
                 viewModel.refreshLaunchAtLoginStatus()
@@ -82,9 +82,48 @@ struct DropdownView: View {
         return waiting == 1 ? "1 waiting" : "\(waiting) waiting"
     }
 
+    private var showsEmptyInbox: Bool {
+        viewModel.databaseError == nil && viewModel.unrepliedPeople.isEmpty
+    }
+
+    private var emptyDropdownHeight: CGFloat {
+        viewModel.permissions.hasAllPermissions ? 360 : 480
+    }
+
+    private var dropdownMinHeight: CGFloat {
+        showsEmptyInbox ? emptyDropdownHeight : 220
+    }
+
+    private var dropdownMaxHeight: CGFloat {
+        showsEmptyInbox ? emptyDropdownHeight : 520
+    }
+
     // MARK: - Content
 
+    @ViewBuilder
     private var contentArea: some View {
+        if showsEmptyInbox {
+            emptyInbox
+        } else {
+            conversationList
+        }
+    }
+
+    private var emptyInbox: some View {
+        VStack(spacing: 0) {
+            if !viewModel.permissions.hasAllPermissions {
+                permissionsBanner
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+            }
+
+            emptyState
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var conversationList: some View {
         List {
             if !viewModel.permissions.hasAllPermissions {
                 Section {
@@ -95,12 +134,6 @@ struct DropdownView: View {
             if let databaseError = viewModel.databaseError {
                 Section("Couldn't read Messages") {
                     databaseErrorSection(databaseError)
-                }
-            } else if viewModel.unrepliedPeople.isEmpty {
-                Section {
-                    emptyState
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 12, leading: 8, bottom: 12, trailing: 8))
                 }
             } else {
                 if !viewModel.unrepliedPastGracePeriod.isEmpty {
