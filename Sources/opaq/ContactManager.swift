@@ -143,9 +143,11 @@ final class ContactManager: @unchecked Sendable {
             CNContactThumbnailImageDataKey as CNKeyDescriptor,
             CNContactPhoneNumbersKey as CNKeyDescriptor,
             CNContactEmailAddressesKey as CNKeyDescriptor,
+            CNContact.descriptorForAllComparatorKeys(),
         ]
 
         let request = CNContactFetchRequest(keysToFetch: keysToFetch)
+        request.sortOrder = .userDefault
         var cards: [ContactCard] = []
 
         var newIdMap: [String: ContactCard] = [:]
@@ -353,5 +355,27 @@ final class ContactManager: @unchecked Sendable {
             handles: [trimmed],
             avatarData: nil
         )
+    }
+
+    /// Saved contacts stay in Contacts' sort order. Handles with no card follow, by name.
+    func sortedByContactName(_ people: [TrackedPerson]) -> [TrackedPerson] {
+        lock.lock()
+        let rank = Dictionary(uniqueKeysWithValues: contactsCache.enumerated().map { ($1.id, $0) })
+        lock.unlock()
+
+        return people.sorted { lhs, rhs in
+            switch (rank[lhs.id], rank[rhs.id]) {
+            case let (left?, right?):
+                return left < right
+            case (.some, nil):
+                return true
+            case (nil, .some):
+                return false
+            case (nil, nil):
+                let order = lhs.displayName.localizedStandardCompare(rhs.displayName)
+                if order == .orderedSame { return lhs.id < rhs.id }
+                return order == .orderedAscending
+            }
+        }
     }
 }
