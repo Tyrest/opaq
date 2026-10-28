@@ -1,0 +1,74 @@
+name: Release
+
+# Push a tag (vX.Y.Z) and CI builds an ad-hoc signed DMG and publishes the
+# GitHub release. There is no Developer ID and no notarization.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish DMG
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Unit tests
+        run: make test
+
+      - name: Verify release version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          APP_VERSION="$(sed -n 's/^[[:space:]]*static let marketing = "\([^"]*\)".*/\1/p' Sources/opaq/AppVersion.swift)"
+          if [[ "$APP_VERSION" != "$VERSION" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match app version $APP_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Build DMG
+        run: make dmg
+
+      - name: Verify signature
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          DMG="dist/opaq-${VERSION}.dmg"
+          MP="$(mktemp -d)"
+          cleanup() {
+            hdiutil detach "$MP" >/dev/null 2>&1 || true
+            rmdir "$MP" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          hdiutil attach -nobrowse -readonly -mountpoint "$MP" "$DMG"
+          codesign --verify --deep --strict --verbose=2 "$MP/opaq.app"
+
+      - name: Release notes from CHANGELOG
+        id: notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! grep -Fq "## [$VERSION]" CHANGELOG.md; then
+            echo "CHANGELOG.md has no entry for $VERSION" >&2
+            exit 1
+          fi
+          NOTES="$(awk -v hdr="## [$VERSION]" 'index($0,hdr)==1{g=1;next} /^## \[/&&g{exit} g{print}' CHANGELOG.md)"
+          if [[ -z "${NOTES//[[:space:]]/}" ]]; then
+            echo "CHANGELOG.md entry for $VERSION is empty" >&2
+            exit 1
+          fi
+          {
+            echo "NOTES<<__OPAQ_EOF__"
+            printf '%s\n' "$NOTES"
+            echo ""
+            echo "This build is ad-hoc signed and not notarized. macOS will ask you to allow it in Privacy & Security. Grant Full Disk Access again after each update."
+            echo "__OPAQ_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*.dmg
+          body: ${{ steps.notes.outputs.NOTES }}
+          make_latest: true

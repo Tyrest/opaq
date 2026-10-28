@@ -365,7 +365,7 @@ final class ContactManager: @unchecked Sendable {
 
         return people.sorted { lhs, rhs in
             switch (rank[lhs.id], rank[rhs.id]) {
-            case let (left?, right?):
+            case (let left?, let right?):
                 return left < right
             case (.some, nil):
                 return true

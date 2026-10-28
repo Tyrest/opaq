@@ -82,7 +82,7 @@ cat << EOF > "$CONTENTS_DIR/Info.plist"
     <key>NSContactsUsageDescription</key>
     <string>opaq needs access to your contacts to match phone numbers and email addresses with names and avatars.</string>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2026. All rights reserved.</string>
+    <string>Copyright © 2026 Tyler. MIT License.</string>
 </dict>
 </plist>
 EOF

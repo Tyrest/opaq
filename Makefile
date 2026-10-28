@@ -4,10 +4,13 @@ else
 FORMAT := xcrun swift-format
 endif
 
-.PHONY: build debug run test format format-check
+.PHONY: build debug run test format format-check dmg
 
 build:
 	./build_app.sh
+
+dmg:
+	./scripts/make-dmg.sh
 
 debug:
 	swift build

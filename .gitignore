@@ -63,6 +63,7 @@ fastlane/test_output
 
 .DS_Store
 opaq.app/
+dist/
 *.pem
 *.p12
 *.key
