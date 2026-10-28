@@ -52,7 +52,7 @@ final class OpaqViewModel {
     }
 
     private(set) var unrepliedPeople: [UnrepliedPerson] = []
-    private(set) var suggestedPeople: [SuggestedPerson] = []
+    private(set) var suggestedPeople: [TrackedPerson] = []
     private(set) var permissions: PermissionStatus = .init(fullDiskAccess: false, contactsAccess: false)
     private(set) var isQuietHoursActive: Bool = false
     private(set) var isRefreshing: Bool = false
@@ -198,7 +198,7 @@ final class OpaqViewModel {
         }
 
         manualAdditions = loadedManual
-        trackedPeople = loadedManual
+        trackedPeople = contactManager.sortedByContactName(loadedManual)
         excludedPersonIds = loadedExcluded
         dismissedTimestamps = loadedDismissed
         trackingBaselineRawAppleDate = loadedBaseline
@@ -513,7 +513,7 @@ final class OpaqViewModel {
                 do {
                     var finalTracked: [TrackedPerson] = []
                     var finalExcluded: [TrackedPerson] = []
-                    var sugg: [SuggestedPerson] = []
+                    var sugg: [TrackedPerson] = []
                     var map: [String: LatestMessageInfo] = [:]
 
                     if fdaGranted {
@@ -521,12 +521,12 @@ final class OpaqViewModel {
                             let allRecords = try databaseService.fetchAllChatPeople(contactManager: contactManager)
                             var seenIds = Set<String>()
 
-                            for record in allRecords where isEligible(record.person) {
-                                seenIds.insert(record.person.id)
-                                if currentExcludedIds.contains(record.person.id) {
-                                    finalExcluded.append(record.person)
+                            for person in allRecords where isEligible(person) {
+                                seenIds.insert(person.id)
+                                if currentExcludedIds.contains(person.id) {
+                                    finalExcluded.append(person)
                                 } else {
-                                    finalTracked.append(record.person)
+                                    finalTracked.append(person)
                                 }
                             }
 
@@ -545,10 +545,10 @@ final class OpaqViewModel {
                         } else {
                             finalTracked = currentManual.filter(isEligible)
                             map = try databaseService.fetchLatestMessages(for: finalTracked)
-                            sugg = try databaseService.fetchTimeDecayedSuggestions(
+                            sugg = try databaseService.fetchUntrackedChatPeople(
                                 trackedPeople: finalTracked,
                                 contactManager: contactManager
-                            ).filter { isEligible($0.person) }
+                            ).filter(isEligible)
                         }
                     } else {
                         finalTracked = currentManual.filter(isEligible)
@@ -589,14 +589,17 @@ final class OpaqViewModel {
 
     private func applySnapshot(_ snapshot: RefreshSnapshot, fullDiskAccess: Bool) {
         databaseError = nil
-        if Self.peopleChanged(trackedPeople, snapshot.tracked) {
-            trackedPeople = snapshot.tracked
+        let tracked = contactManager.sortedByContactName(snapshot.tracked)
+        let excluded = contactManager.sortedByContactName(snapshot.excluded)
+        let suggestions = contactManager.sortedByContactName(snapshot.suggestions)
+        if Self.peopleChanged(trackedPeople, tracked) {
+            trackedPeople = tracked
         }
-        if Self.peopleChanged(excludedPeople, snapshot.excluded) {
-            excludedPeople = snapshot.excluded
+        if Self.peopleChanged(excludedPeople, excluded) {
+            excludedPeople = excluded
         }
-        if Self.suggestionsChanged(suggestedPeople, snapshot.suggestions) {
-            suggestedPeople = snapshot.suggestions
+        if Self.peopleChanged(suggestedPeople, suggestions) {
+            suggestedPeople = suggestions
         }
         rawLatestMessages = snapshot.latest
         if fullDiskAccess {
@@ -621,8 +624,8 @@ final class OpaqViewModel {
         if Self.peopleChanged(excludedPeople, filteredExcluded) {
             excludedPeople = filteredExcluded
         }
-        let filteredSuggestions = suggestedPeople.filter { eligible($0.person) }
-        if Self.suggestionsChanged(suggestedPeople, filteredSuggestions) {
+        let filteredSuggestions = suggestedPeople.filter(eligible)
+        if Self.peopleChanged(suggestedPeople, filteredSuggestions) {
             suggestedPeople = filteredSuggestions
         }
         recalculateUnrepliedStatus()
@@ -651,19 +654,6 @@ final class OpaqViewModel {
                 || lhs.displayName != rhs.displayName
                 || lhs.handles != rhs.handles
                 || lhs.avatarData != rhs.avatarData
-            {
-                return true
-            }
-        }
-        return false
-    }
-
-    private static func suggestionsChanged(_ current: [SuggestedPerson], _ next: [SuggestedPerson]) -> Bool {
-        guard current.count == next.count else { return true }
-        for (lhs, rhs) in zip(current, next) {
-            if lhs.person.id != rhs.person.id
-                || lhs.person.displayName != rhs.person.displayName
-                || lhs.totalMessages != rhs.totalMessages
             {
                 return true
             }
@@ -700,7 +690,7 @@ final class OpaqViewModel {
             saveManualAdditions()
         }
         if !trackedPeople.contains(where: { $0.id == person.id }) {
-            trackedPeople.append(person)
+            trackedPeople = contactManager.sortedByContactName(trackedPeople + [person])
         }
         refresh()
     }
@@ -755,7 +745,7 @@ final class OpaqViewModel {
 private struct RefreshSnapshot: Sendable {
     var tracked: [TrackedPerson]
     var excluded: [TrackedPerson]
-    var suggestions: [SuggestedPerson]
+    var suggestions: [TrackedPerson]
     var latest: [String: LatestMessageInfo]
 }
 

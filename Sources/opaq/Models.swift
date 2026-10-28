@@ -187,21 +187,6 @@ struct UnrepliedPerson: Identifiable, Equatable, Sendable {
     }
 }
 
-// MARK: - Suggested Person Model
-
-struct SuggestedPerson: Identifiable, Equatable, Sendable {
-    var id: String { person.id }
-    let person: TrackedPerson
-    let totalMessages: Int
-    let recencyWeightedScore: Double
-
-    init(person: TrackedPerson, totalMessages: Int, recencyWeightedScore: Double) {
-        self.person = person
-        self.totalMessages = totalMessages
-        self.recencyWeightedScore = recencyWeightedScore
-    }
-}
-
 // MARK: - Permission Status
 
 struct PermissionStatus: Equatable, Sendable {

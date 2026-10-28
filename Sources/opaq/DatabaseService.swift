@@ -128,37 +128,23 @@ final class DatabaseService: Sendable {
 
     // MARK: - Query A: Chat Discovery & Suggestions
 
-    func fetchAllChatPeople(contactManager: ContactManager = .shared) throws -> [SuggestedPerson] {
+    func fetchAllChatPeople(contactManager: ContactManager = .shared) throws -> [TrackedPerson] {
         let db = try openDatabase()
         defer { sqlite3_close(db) }
 
         let sql = """
-            SELECT
-                h.id AS handle_identifier,
-                COUNT(m.ROWID) AS total_messages,
-                SUM(
-                    1.0 / (1.0 + ((strftime('%s', 'now') - (m.date / 1000000000 + 978307200)) / 86400.0) * 0.1)
-                ) AS recency_weighted_score
+            SELECT DISTINCT h.id
             FROM message m
             JOIN handle h ON m.handle_id = h.ROWID
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             JOIN chat c ON cmj.chat_id = c.ROWID
             WHERE c.style = 45
-            GROUP BY h.id
-            ORDER BY recency_weighted_score DESC
-            LIMIT 500;
             """
 
         let stmt = try prepare(db, sql: sql, context: "prepare chat people")
         defer { sqlite3_finalize(stmt) }
 
-        struct RawChatPartner {
-            let handle: String
-            let totalMessages: Int
-            let score: Double
-        }
-
-        var rawList: [RawChatPartner] = []
+        var grouped: [String: TrackedPerson] = [:]
         while true {
             let stepRC = sqlite3_step(stmt)
             if stepRC == SQLITE_DONE { break }
@@ -167,54 +153,27 @@ final class DatabaseService: Sendable {
             }
             let handle = Self.columnText(stmt, 0)
             if handle.isEmpty { continue }
-            let total = Int(sqlite3_column_int(stmt, 1))
-            let score = sqlite3_column_double(stmt, 2)
-            rawList.append(RawChatPartner(handle: handle, totalMessages: total, score: score))
-        }
-
-        struct GroupedChat {
-            var person: TrackedPerson
-            var total: Int
-            var score: Double
-        }
-
-        var grouped: [String: GroupedChat] = [:]
-
-        for raw in rawList {
-            let card = contactManager.findContact(for: raw.handle)
-            let key = card?.id ?? ContactManager.normalizeHandle(raw.handle)
+            let card = contactManager.findContact(for: handle)
+            let key = card?.id ?? ContactManager.normalizeHandle(handle)
             let existing = grouped[key]
-            let handles = Self.mergedHandles(
-                existing: existing?.person.handles ?? [],
-                card: card,
-                rawHandle: raw.handle
-            )
-            let displayName = existing?.person.displayName ?? card?.displayName ?? raw.handle
-            let person = TrackedPerson(
+            grouped[key] = TrackedPerson(
                 id: key,
-                displayName: displayName,
-                handles: handles,
+                displayName: existing?.displayName ?? card?.displayName ?? handle,
+                handles: Self.mergedHandles(
+                    existing: existing?.handles ?? [],
+                    card: card,
+                    rawHandle: handle
+                ),
                 avatarData: card?.avatarData
             )
-            if var existing {
-                existing.person = person
-                existing.total += raw.totalMessages
-                existing.score += raw.score
-                grouped[key] = existing
-            } else {
-                grouped[key] = GroupedChat(person: person, total: raw.totalMessages, score: raw.score)
-            }
         }
-
-        return grouped.values
-            .map { SuggestedPerson(person: $0.person, totalMessages: $0.total, recencyWeightedScore: $0.score) }
-            .sorted { $0.recencyWeightedScore > $1.recencyWeightedScore }
+        return Array(grouped.values)
     }
 
-    func fetchTimeDecayedSuggestions(
+    func fetchUntrackedChatPeople(
         trackedPeople: [TrackedPerson],
         contactManager: ContactManager = .shared
-    ) throws -> [SuggestedPerson] {
+    ) throws -> [TrackedPerson] {
         let allDiscovered = try fetchAllChatPeople(contactManager: contactManager)
 
         var trackedIds = Set<String>()
@@ -231,9 +190,9 @@ final class DatabaseService: Sendable {
             }
         }
 
-        return allDiscovered.compactMap { record in
-            if trackedIds.contains(record.person.id) { return nil }
-            for h in record.person.handles {
+        return allDiscovered.compactMap { person in
+            if trackedIds.contains(person.id) { return nil }
+            for h in person.handles {
                 let norm = ContactManager.normalizeHandle(h)
                 let phoneNorm = ContactManager.normalizePhone(h)
                 if trackedHandles.contains(h) || trackedHandles.contains(norm) {
@@ -243,7 +202,7 @@ final class DatabaseService: Sendable {
                     return nil
                 }
             }
-            return record
+            return person
         }
     }
 

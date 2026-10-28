@@ -247,29 +247,25 @@ struct PeopleManagerView: View {
                     Text(
                         viewModel.onlyTrackContacts
                             ? "People saved in Contacts who you text will appear here."
-                            : "Top 1-on-1 conversations from iMessage will automatically appear here."
+                            : "1-on-1 conversations from iMessage will appear here."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
             } else {
-                ForEach(viewModel.suggestedPeople) { suggestion in
+                ForEach(viewModel.suggestedPeople) { person in
                     HStack(spacing: 10) {
                         ContactIdentityRow(
-                            name: suggestion.person.displayName,
-                            detail: suggestion.person.primaryHandle,
-                            avatarData: suggestion.person.avatarData,
-                            cacheKey: suggestion.person.id
+                            name: person.displayName,
+                            detail: person.primaryHandle,
+                            avatarData: person.avatarData,
+                            cacheKey: person.id
                         )
 
                         Spacer()
 
-                        Text("\(suggestion.totalMessages) messages")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
                         Button("Track") {
-                            viewModel.addTrackedPerson(suggestion.person)
+                            viewModel.addTrackedPerson(person)
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
