@@ -1,0 +1,20 @@
+---
+description: Open a pull request for every requested project change
+alwaysApply: true
+---
+
+# Ship every change as a pull request
+
+When the user asks for a change in this repo, finish by opening a pull request against `master`. That request is the authorization to commit and push the branch. They squash-merge it themselves. Do not merge, and do not wait to be asked to commit or open the PR.
+
+Skip this for questions, reviews, explanations, and any request that does not change the repo.
+
+## How
+
+1. Branch from up-to-date `origin/master`. Name the branch for what the change does.
+2. Make the change, including callers, tests, and fixtures it breaks.
+3. Commit only the files for that change. Message style matches recent commits: one sentence about why, ending with a period.
+4. Push the branch and open the PR with `gh pr create`. Base is `master`. Title is the squash commit they will land. Body is a short summary and a test-plan checklist.
+5. Reply with the PR URL.
+
+Do not push to `master`. Leave unrelated working-tree changes out of the commit. Do not commit secrets.
