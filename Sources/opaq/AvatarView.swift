@@ -24,11 +24,12 @@ struct AvatarView: View {
                     .clipShape(Circle())
             } else {
                 Circle()
-                    .fill(gradientForName(name))
+                    .fill(Color(nsColor: .tertiaryLabelColor))
                     .frame(width: size, height: size)
                     .overlay(
                         Text(initialsForName(name))
-                            .font(.system(size: max(9, size * 0.38), weight: .semibold, design: .rounded))
+                            // shortcut: diameter * 0.5 matches Contacts at the 28pt rows we draw; use its stepped sizes if avatars exceed 32pt
+                            .font(.system(size: size * 0.5, weight: .regular))
                             .foregroundStyle(.white)
                     )
             }
@@ -71,25 +72,5 @@ struct AvatarView: View {
             return String(first.prefix(1)).uppercased()
         }
         return "?"
-    }
-
-    private func gradientForName(_ name: String) -> LinearGradient {
-        var hash: Int = 0
-        for u in name.unicodeScalars {
-            hash = (hash &<< 5) &- hash &+ Int(u.value)
-        }
-
-        let palettes: [[Color]] = [
-            [Color(red: 0.40, green: 0.45, blue: 0.95), Color(red: 0.58, green: 0.40, blue: 0.96)],
-            [Color(red: 0.20, green: 0.60, blue: 0.92), Color(red: 0.35, green: 0.44, blue: 0.92)],
-            [Color(red: 0.88, green: 0.36, blue: 0.56), Color(red: 0.65, green: 0.30, blue: 0.88)],
-            [Color(red: 0.15, green: 0.68, blue: 0.60), Color(red: 0.14, green: 0.55, blue: 0.75)],
-            [Color(red: 0.92, green: 0.50, blue: 0.28), Color(red: 0.88, green: 0.30, blue: 0.42)],
-            [Color(red: 0.50, green: 0.40, blue: 0.92), Color(red: 0.80, green: 0.35, blue: 0.70)],
-            [Color(red: 0.30, green: 0.72, blue: 0.65), Color(red: 0.20, green: 0.52, blue: 0.85)],
-        ]
-
-        let pair = palettes[abs(hash) % palettes.count]
-        return LinearGradient(colors: pair, startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 }
